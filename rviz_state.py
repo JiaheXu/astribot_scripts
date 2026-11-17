@@ -70,6 +70,8 @@ def pose_markers(poses, stamp, state, lifetime):
             marker.header.frame_id, marker.header.stamp = FRAME, stamp
             marker.ns, marker.id = state, index * 4 + axis
             marker.action = Marker.ADD
+            # Follow the latest chassis TF; SDK polling and LiDAR clocks are not synchronized.
+            marker.frame_locked = True
             marker.lifetime = Duration(seconds=lifetime).to_msg()
             marker.pose.position.x, marker.pose.position.y, marker.pose.position.z = map(float, pose[:3])
             marker.color.a = alpha

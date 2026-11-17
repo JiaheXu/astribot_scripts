@@ -40,7 +40,8 @@ class MonitorTests(unittest.TestCase):
         return module
 
     def run_main(self, module, args):
-        with patch.object(sys, 'argv', ['monitor', *args]), \
+        with patch.dict(sys.modules, self.modules), \
+                patch.object(sys, 'argv', ['monitor', *args]), \
                 patch.object(module.time, 'sleep'), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
             module.main()
@@ -137,7 +138,7 @@ class MonitorTests(unittest.TestCase):
         self.ros.shutdown.assert_called_once()
 
     def test_startup_answers_enter_and_restores_input(self):
-        for filename in ('300-get_images.py', '301-get_lidar_scan.py', 'get_liadra_and_img.py', 'get_joints_and_poses.py'):
+        for filename in ('300-get_images.py', '301-get_lidar_scan.py', 'get_lidar_and_img.py', 'get_joints_and_poses.py'):
             for fails in (False, True):
                 with self.subTest(filename=filename, fails=fails):
                     module = self.load(filename)
@@ -166,7 +167,7 @@ class MonitorTests(unittest.TestCase):
                     self.assertEqual(answers, [''])
 
     def test_combined_stream_publishes_standard_images_and_original_clouds(self):
-        module = self.load('get_liadra_and_img.py')
+        module = self.load('get_lidar_and_img.py')
         node = self.robot.astribot_interface.node
         for name in ('imshow', 'waitKey', 'destroyAllWindows'):
             getattr(self.modules['cv2'], name).side_effect = AssertionError('GUI must never be used')
@@ -229,7 +230,7 @@ class MonitorTests(unittest.TestCase):
     def test_combined_stream_reports_activation_failure(self):
         for driver in ('camera', 'lidar'):
             with self.subTest(driver=driver):
-                module = self.load('get_liadra_and_img.py')
+                module = self.load('get_lidar_and_img.py')
                 getattr(self.robot, f'activate_{driver}').return_value = False
                 with self.assertRaisesRegex(RuntimeError, 'activation failed'):
                     self.run_main(module, ['--headless'])

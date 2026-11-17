@@ -7,9 +7,61 @@ Visualization Manager:
   Class: ""
   Global Options:
     Background Color: 35; 35; 40
-    Fixed Frame: astribot_viz_chassis
+    Fixed Frame: kiss_rear_odom
     Frame Rate: 30
   Displays:
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Rear KISS local map
+      Enabled: true
+      Topic:
+        Value: /kiss/rear/local_map
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Position Transformer: XYZ
+      Color Transformer: AxisColor
+      Axis: Z
+      Style: Points
+      Size (Pixels): 2
+      Alpha: 1
+      Decay Time: 0
+    - Class: rviz_default_plugins/Odometry
+      Name: Robot base odometry
+      Enabled: true
+      Topic:
+        Value: /kiss/base/odometry
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+      Keep: 1000
+      Position Tolerance: 0.02
+      Angle Tolerance: 0.02
+      Shape:
+        Value: Axes
+        Axes Length: 0.25
+        Axes Radius: 0.01
+        Alpha: 1
+      Covariance:
+        Value: false
+    - Class: rviz_default_plugins/Odometry
+      Name: Original LiDAR odometry (reference)
+      Enabled: false
+      Topic:
+        Value: /kiss/rear/odometry
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Keep: 300
+      Shape:
+        Value: Axes
+        Axes Length: 0.12
+        Axes Radius: 0.005
+        Alpha: 0.5
+      Covariance:
+        Value: false
     - Class: rviz_default_plugins/Grid
       Name: Ground grid
       Enabled: true

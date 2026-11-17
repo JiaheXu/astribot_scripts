@@ -3,7 +3,8 @@
 This folder contains selected/adapted scripts from `examples/`, combined
 image/lidar and joint/pose monitors, and RViz2 visualization files for development
 on the receiving computer. These observation
-scripts do not save sensor data or send joint/motion commands. The separate
+publishers do not save sensor data or send joint/motion commands. The optional
+`record_robot_data.sh` saves a ROS bag. The separate
 `startup.py` described below does command home motion.
 The originals in `examples/` were left unchanged during this organization pass.
 
@@ -58,7 +59,7 @@ The current `env.sh` sets `ROBOT_TYPE=S1`, `ROS_DOMAIN_ID=25`, Fast DDS, and a
 robot must have compatible ROS discovery/network settings. Use the SDK's Python
 environment (the bundled middleware targets Python 3.10).
 
-**Camera (300), lidar (301), combined streaming (`get_liadra_and_img.py`), and `get_joints_and_poses.py` automatically answer the SDK prompt with Enter.**
+**Camera (300), lidar (301), `get_lidar_and_img.py`, `get_joints_and_poses.py`, and `publish_robot_data.py` automatically answer the SDK prompt with Enter.**
 Only during `Astribot()` construction, these custom scripts temporarily replace
 `input()` with an empty response. Normal input is restored afterwards, including
 when initialization fails. No SDK source changes are required. The SDK may still
@@ -67,7 +68,7 @@ the scripts subscribe to the sensor messages published by the robot's drivers.
 
 The other scripts still use the SDK's default control-rights handling. When another
 controller is running, press **Enter**, not `yes`, at their control-rights prompt
-to continue without taking control. In **all** scripts, including 300, 301 and `get_liadra_and_img.py`,
+to continue without taking control. In **all** scripts, including 300, 301 and `get_lidar_and_img.py`,
 the unchanged SDK can still claim control automatically if no owner is found.
 The automatic Enter response declines takeover when another owner is present;
 it does not disable acquisition altogether. SDK background services still run. See
@@ -109,7 +110,103 @@ Refresh defaults to 1 Hz; stop with Ctrl-C. The script reads and prints only: it
 does not publish topics, save files or issue motion commands. The SDK's existing
 startup/control-rights behavior and state freshness limitations still apply.
 
+## Publish and record sensors, IMUs and robot state together
+
+Run from the repository root after sourcing ROS and `env.sh` as above:
+
+```bash
+python3 astribot_scripts/publish_robot_data.py
+```
+
+This replaces the separate image/lidar and joint/pose processes with **one SDK
+connection**, no GUI and no motion commands. It activates camera/lidar drivers
+without resetting them and leaves them running on exit. The SDK control-rights
+behavior described above still applies. All five color cameras are selected by
+default; only head depth has a configured decoder. Joint/pose polling defaults
+to 50 Hz; sensors publish when messages arrive. To reduce image bandwidth:
+
+```bash
+python3 astribot_scripts/publish_robot_data.py --cameras head_rgbd --rate 30
+```
+
+| Topic | Type / contents |
+| --- | --- |
+| `/sdk/astribot_camera/<camera>/color_image` | `sensor_msgs/msg/Image`, BGR8 |
+| `/sdk/astribot_camera/head_rgbd/depth_image` | `sensor_msgs/msg/Image`, 16UC1, default 640×576 little endian |
+| `/sdk/astribot_lidar/{front,back}_scan` | Complete `sensor_msgs/msg/PointCloud2`, including original time fields |
+| `/sdk/astribot_lidar/{front,back}_imu` | `sensor_msgs/msg/Imu` from `/livox/imu_front` and `/livox/imu_back` |
+| `/sdk/astribot_chassis/imu` | `sensor_msgs/msg/Imu` from `/astribot_whole_body/imu_sensor/astribot_chassis_imu_site` |
+| `/astribot_viz/joint_states` | Current `sensor_msgs/msg/JointState`: 20 model joints, position/velocity/effort |
+| `/sdk/desired_joint_states` | Desired `sensor_msgs/msg/JointState`, same model ordering |
+| `/sdk/cartesian/{current,desired}/<part>` | `geometry_msgs/msg/PoseStamped` in `astribot_viz_chassis` |
+| `/sdk/chassis/{current,desired}_pose` | `geometry_msgs/msg/PoseStamped` in the separate `astribot_sdk_world` frame |
+| `/astribot_viz/{current,desired}_poses` | Existing `visualization_msgs/msg/MarkerArray` for RViz |
+| `/sdk/robot_state` | `std_msgs/msg/String` JSON: all 25 SDK values for current/desired position, velocity and torque |
+| `/sdk/robot_description` | Transient-local `std_msgs/msg/String`: generated S1 URDF |
+
+Cartesian parts are `astribot_chassis`, `astribot_torso`, `astribot_arm_left`,
+`astribot_arm_right`, and `astribot_head`. The JSON snapshot has `schema_version`,
+`timestamp_basis`, `poll_started`, `poll_finished`, and
+`states.<current|desired>.<position|velocity|torque>.<part>` arrays. It retains
+gripper opening values in SDK units, without pretending they are angular model
+joints. Chassis position is `[x, y, yaw]`; the 20 model joints use rad, rad/s and Nm.
+
+Sensor headers, IMU values and covariances are preserved, including empty frame
+IDs or unknown-orientation flags. No IMU frame, extrinsic calibration or orientation
+is invented. Joint and pose stamps are **polling times**, and separate SDK getters
+are not an atomic snapshot or proof of fresh measurements. The SDK world frame is
+not aligned to KISS-ICP by this publisher. IMU counters in the terminal should
+increase for all three streams; a discovered topic alone does not prove receipt.
+
+In a second sourced terminal, record to a new bag directory:
+
+```bash
+bash astribot_scripts/record_robot_data.sh ./robot_data_run01
+# Ctrl-C to finish, then inspect counts/types:
+ros2 bag info ./robot_data_run01
+```
+
+The recorder includes every `/sdk/` topic, the three RViz state topics, the original
+front/rear Livox clouds and IMUs, and the original chassis IMU. Raw Livox topics
+keep existing KISS-ICP input names usable on replay; their `/sdk/` copies duplicate
+those data intentionally. The QoS file captures the latched URDF even if recording
+starts later. All camera streams are uncompressed here, so check disk space and
+received counts. The publisher itself never starts recording automatically.
+
+For live robot-model visualization alongside the combined publisher:
+
+```bash
+ros2 launch ./astribot_scripts/astribot_rviz.launch.py publish_state:=false
+```
+
+For offline model/FK replay, stop live publishers and use an isolated ROS domain
+in both replay terminals:
+
+```bash
+export ROS_DOMAIN_ID=125
+ros2 launch ./astribot_scripts/astribot_rviz.launch.py publish_state:=false use_sim_time:=true
+# Second terminal, same domain:
+ros2 bag play ./robot_data_run01 --clock
+```
+
+The launch rebuilds model TF from recorded joint states; TF need not be recorded.
+Keep the SDK model/config/mesh files with your dataset: the URDF message contains
+file references, not embedded meshes. Run the existing rear KISS-ICP setup against
+`/livox/lidar_back` with `use_sim_time:=true` on replay to regenerate odometry and
+the local map. It does not consume these IMUs; they are recorded for later use.
+Adding `odometry:=true` to the RViz launch still requires the verified
+cloud-to-chassis calibration described below. Recording additional streams does
+not resolve that calibration, cross-PC clock offsets, camera intrinsics or depth
+units; calibrated IMU fusion and RGB-D reconstruction need those separately.
+
 ## Robot model and all Cartesian poses in RViz2
+
+For nominal camera offsets relative to head, torso and wrist joint/link frames,
+see [camera_mounts_reference.md](camera_mounts_reference.md). It records official
+S1 MJCF sources, composed wrist offsets and the camera-to-ROS optical-axis
+conversion; these mounts are not automatically published as calibrated TF.
+For the chassis and both LiDAR IMUs, see [imu_mounts_reference.md](imu_mounts_reference.md),
+including poses composed into the model's chassis frame and ROS-order quaternions.
 
 On the computer with a display, source ROS and `env.sh` as above, then run from
 the repository root:
@@ -171,20 +268,133 @@ fresh. Invalid samples are skipped, and pose markers expire after publication
 stops; the RobotModel may retain its last joint state. Model-to-SDK calibration
 alignment and live RViz rendering still need verification on the robot.
 
-For camera and lidar together, run **`get_liadra_and_img.py` instead of separate 300/301 processes**:
+### Rear KISS-ICP odometry and the robot base
 
-```bash
-python3 astribot_scripts/get_liadra_and_img.py --cameras head_rgbd left_wrist_rgbd right_wrist_rgbd
+The combined RViz file now includes the rear local map, base odometry history,
+and an optional original-LiDAR odometry display. It follows the setup in
+`~/astribot/kiss_iiiicp_utils`: input `/livox/lidar_back`, KISS output
+`/kiss/rear/odometry`, map `/kiss/rear/local_map`, parent frame `kiss_rear_odom`,
+and cloud frame `livox_frame`. Keep KISS's **`base_frame: ""` and
+`publish_odom_tf: false`**; this adapter handles the conversion separately.
+KISS-ICP must already be running. This launch does not start or reconfigure it.
+
+`rear_lidar_odometry.py` publishes `/kiss/base/odometry` (`nav_msgs/msg/Odometry`)
+with child frame `astribot_viz_chassis`, the same SDK chassis origin used by the
+robot model. It broadcasts the following tree **only on `/astribot_viz/tf` and
+`/astribot_viz/tf_static`**, leaving the driver's navigation TF untouched:
+
+```text
+kiss_rear_odom
+  └─ astribot_viz_chassis
+       ├─ livox_frame                 (calibrated static mount)
+       └─ astribot_torso_base         (existing robot model)
+            └─ torso / arms / head
 ```
 
-`get_liadra_and_img.py` uses one SDK connection, automatically activates both camera and lidar drivers,
+**Calibration is still missing.** `rear_lidar_to_base.yaml` intentionally has
+`base_from_cloud: null`. Fill it with `T_base_cloud`, the rigid transform that
+maps the actual input cloud's coordinates to SDK chassis coordinates, in meters:
+`p_base = R_base_cloud * p_cloud + t_base_cloud`. Its rotation must be orthonormal
+with determinant +1. A missing matrix, reflection or malformed matrix stops
+the odometry launch before SDK initialization. No identity transform is assumed.
+
+The local SDK's 15 URDF/SDF files contain no LiDAR links or sensor tags, and its
+YAML files contain no LiDAR mount. A deeper inspection of the official
+`Astribot-Dev/astribot_descriptions` repository found explicit **nominal S1 mounts
+in MJCF**, although its whole-body URDF/SDF omit these LiDAR frames. This corrects
+the earlier, incomplete public-source search.
+
+The following values are pinned to commit `32b67e270fecd49bd5444ca49824dcc171dfb3e6`:
+
+| Sensor | Position relative to MJCF `chassis_base` (meters) | Roll/pitch/yaw (degrees, approximately) | Source |
+| --- | --- | --- | --- |
+| Front | `[0.17393, 0.16893, 0.073397]` | `[0, 0, -45]` | [lidar_mid360_front.xml](https://github.com/Astribot-Dev/astribot_descriptions/blob/32b67e270fecd49bd5444ca49824dcc171dfb3e6/astribot_s1/model/mjcf/robot/sensors/lidar_mid360_front.xml) |
+| Rear | `[-0.1795908, -0.1745908, 0.157397]` | `[0, 0, 135]` | [lidar_mid360_back.xml](https://github.com/Astribot-Dev/astribot_descriptions/blob/32b67e270fecd49bd5444ca49824dcc171dfb3e6/astribot_s1/model/mjcf/robot/sensors/lidar_mid360_back.xml) |
+
+[s1.xml](https://github.com/Astribot-Dev/astribot_descriptions/blob/32b67e270fecd49bd5444ca49824dcc171dfb3e6/astribot_s1/model/mjcf/robot/s1.xml)
+includes both sensor bodies directly inside `chassis_base`. Their MJCF
+quaternions are `[w,x,y,z]`: front `[0.9238796,0,0,-0.3826834]`, rear
+`[0.3826834,0,0,0.9238795]`. ROS uses `[x,y,z,w]`.
+The `chassis_base` position `[0,0,0.095]` in that entry point is the simulation's
+initial world placement, not another LiDAR mounting offset.
+
+These model mounts are useful references, but do not establish that the MJCF
+`chassis_base` equals the installed SDK `chassis` origin, or that live rear-cloud
+points are expressed in the rear sensor frame. The repository README also warns
+that coordinate conventions can differ between model formats. These values have
+therefore not been inserted into the active odometry calibration.
+
+Older local evidence exists in
+`~/astribot/Astribot_S1/workspace/src/astribot_navigation/towergo_real/config/calibration.vendor.yaml`:
+
+```text
+Unverified FRONT-cloud candidate only; not an active configuration:
+  [ 0.696665,  0.717397, 0, 0.17393 ]
+  [-0.717397,  0.696665, 0, 0.16893 ]
+  [ 0,         0,        1, 0.054   ]
+  [ 0,         0,        0, 1       ]
+```
+
+That file is explicitly `verified: false`: its rotation is unconfirmed, and
+its notes report a determinant -1 for the vendor's rear-sensor matrix. Historical
+driver checks also found rear clouds already expressed in the front-LiDAR frame.
+Neither the `/livox/lidar_back` topic name nor `livox_frame` proves the physical
+sensor coordinate frame. Do not apply a rear mount twice. The remaining source
+to inspect on the robot is `/etc/config/sensor_calib.json` together with the
+active Livox driver's `MID360_config.json` and point transformation settings.
+
+After supplying the correct matrix, run from the repository root:
+
+```bash
+# Same computer: SDK state + base conversion + model + RViz.
+ros2 launch ./astribot_scripts/astribot_rviz.launch.py odometry:=true
+
+# Separate desktop: rviz_state.py already runs on the robot-connected PC.
+ros2 launch ./astribot_scripts/astribot_rviz.launch.py \
+  odometry:=true publish_state:=false
+```
+
+The launcher selects fixed frame `kiss_rear_odom` with `odometry:=true`; the
+default `odometry:=false` retains the previous chassis-relative model view.
+To inspect the local map before calibration, open the RViz file directly and
+enable **Original LiDAR odometry (reference)**; disable RobotModel/current/
+desired/base-odometry displays until their transforms are available:
+
+```bash
+rviz2 -d ./astribot_scripts/astribot_poses.rviz --ros-args \
+  -r /tf:=/astribot_viz/tf -r /tf_static:=/astribot_viz/tf_static
+```
+
+Conversion uses `T_odom_base = T_odom_cloud * inverse(T_base_cloud)`. It retains
+the KISS map frame and input timestamp, including the initial base offset; it
+does not reset the base to zero or rotate the existing map. Pose covariance
+includes the lever arm's first-order position/orientation coupling, treating
+calibration as exact; upstream KISS covariance is nominal, not measured accuracy.
+KISS does not estimate twist, so output velocities remain zero with large
+covariance (1e12 diagonal); **do not fuse them as measured velocity**.
+
+The upstream scan-header/deskew-to-scan-end timing distinction remains unchanged
+(about 100 ms in the earlier recording). SDK pose markers follow the latest
+chassis TF for visualization; joints and Cartesian states are not synchronized
+to the LiDAR exposure. This is not a sensor-fusion or navigation validation.
+Replay uses `use_sim_time:=true publish_state:=false` and a bag clock; animated
+joints/pose markers also require recorded `/astribot_viz/` state topics. A
+LiDAR-only bag supplies base motion, not torso/arm/head joint observations.
+
+For camera and lidar together, run **`get_lidar_and_img.py` instead of separate 300/301 processes**:
+
+```bash
+python3 astribot_scripts/get_lidar_and_img.py --cameras head_rgbd left_wrist_rgbd right_wrist_rgbd
+```
+
+`get_lidar_and_img.py` uses one SDK connection, automatically activates both camera and lidar drivers,
 and receives their existing topics. It does not reset lidar before activation.
 The camera driver publishes
 `/astribot_camera/<camera>/color_compress/compressed` (`sensor_msgs/msg/CompressedImage`);
 the lidar driver publishes `/livox/lidar_front` and `/livox/lidar_back`
-(`sensor_msgs/msg/PointCloud2`). Without `--cameras`, `get_liadra_and_img.py` receives `head_rgbd` plus both
+(`sensor_msgs/msg/PointCloud2`). Without `--cameras`, `get_lidar_and_img.py` receives `head_rgbd` plus both
 lidars. These input types are already standard ROS 2 messages, despite the
-`astribot` names in the camera topic paths. `get_liadra_and_img.py` additionally publishes decoded
+`astribot` names in the camera topic paths. `get_lidar_and_img.py` additionally publishes decoded
 images and relays complete lidar messages on these separate output topics:
 
 | Output topic | ROS 2 message type | Content |
@@ -202,11 +412,11 @@ custom message types. It uses Best Effort, volatile QoS with queue depth 10 for
 these outputs; downstream subscribers should use sensor-data/Best Effort QoS.
 Avoid another publisher on the same output topics.
 
-`get_liadra_and_img.py` always runs without a GUI, including when no flags are supplied. It never
+`get_lidar_and_img.py` always runs without a GUI, including when no flags are supplied. It never
 opens windows or calls OpenCV GUI functions; no Qt display setup is needed.
 `--headless` is accepted for compatibility but is no longer required. The SDK
 still uses OpenCV to decode JPEG pixels for standard Image publishing.
-Uncompressed images require more bandwidth than the compressed input. `get_liadra_and_img.py` prints
+Uncompressed images require more bandwidth than the compressed input. `get_lidar_and_img.py` prints
 image/scan/point counts once per second. Stop with Ctrl-C. Both drivers remain
 running after exit, including if activation of one driver fails after the other
 succeeded.
@@ -258,10 +468,11 @@ as an explicit alias for lidar's default. No monitor writes images or rosbag fil
 | --- | --- | --- |
 | `300-get_images.py` | `image_callback(topic_name, msg, width, height, array)` | Continuous color subscriptions; GUI keeps only the newest image per camera |
 | `301-get_lidar_scan.py` | `LidarMonitor.lidar_callback(name, msg)` | Continuous front/back `PointCloud2`; all original fields are available in `msg` |
-| `get_liadra_and_img.py` | `image_callback(...)` and `lidar_callback(name, msg)` | Automatic activation, raw Image publishing and complete PointCloud2 relay using one SDK connection |
+| `get_lidar_and_img.py` | `image_callback(...)` and `lidar_callback(name, msg)` | Automatic activation, raw Image publishing and complete PointCloud2 relay using one SDK connection |
 | `101-get_joint_states.py` | `report(astribot)` and `get_current_joints_*()` | Continuous polling; desired values are commands, not measurements |
 | `102-get_cartesian_states.py` | `report(astribot, frame)` | Continuous polling of both arms' SDK EE poses |
 | `get_joints_and_poses.py` | `report(astribot, frame)` | Combined current/desired joint and Cartesian tables, one SDK connection |
+| `publish_robot_data.py` | `read_state(robot, lifetime)` and shared `SensorPublisher` | Combined standard sensor/state topics, three IMUs and recordable full SDK snapshots |
 | `100-get_robot_properties.py` | Names, DOFs, position/velocity/torque limits | One snapshot; corrected the original's reversed lower/upper limit assignment |
 | `204-forward_kinematics.py` | `get_forward_kinematics(names, joints_position)` | One calculation using hard-coded example joint values, not live measurements |
 | `205-inverse_kinematics.py` | `get_inverse_kinematics(names, cartesian_pose)` | One calculation using hard-coded target poses; no motion command |
@@ -270,7 +481,7 @@ as an explicit alias for lidar's default. No monitor writes images or rosbag fil
 The camera topics are `/astribot_camera/<camera>/color_compress/compressed`.
 Available selections are `head_rgbd`, `torso_rgbd`, `left_wrist_rgbd`,
 `right_wrist_rgbd`, and `head_stereo`. Display arrays are BGR. In 300, headless mode
-receives compressed bytes; `get_liadra_and_img.py` always decodes for standard Image publishing.
+receives compressed bytes; `get_lidar_and_img.py` always decodes for standard Image publishing.
 The combined script additionally wraps the configured head raw depth as `16UC1`;
 other cameras remain color-only. Stereo splitting, depth/color registration and
 camera calibration are not supplied here.
@@ -345,6 +556,12 @@ Monitor checks substitute ROS, SDK and GUI dependencies before importing scripts
 and serialization to validate pixel packing and header preservation offline.
 `test_rviz_state.py` checks model mesh paths, joint mapping, pose axes/labels,
 invalid data handling, ROS serialization and the mocked SDK polling loop.
+`test_rear_lidar_odometry.py` checks mount inversion, rotated lever arms,
+covariance propagation, frame validation and refusal of invalid calibration.
+`test_robot_data.py` checks full joint/pose snapshots, IMU header/covariance
+preservation, invalid samples, single-connection cleanup and recorder topic selection.
+The base conversion and private TF tree were also checked with synthetic ROS
+odometry and joints on an isolated local domain, without the SDK or robot.
 An isolated local ROS smoke check also verified 20 moving-link transforms, the
 fixed chassis mount and robot-description delivery using synthetic joints.
 UDP networking was restricted in that check; it does not validate cross-PC DDS.

@@ -11,7 +11,7 @@ from std_msgs.msg import Header
 
 class ImageMessageTests(unittest.TestCase):
     def setUp(self):
-        path = Path(__file__).with_name('get_liadra_and_img.py')
+        path = Path(__file__).with_name('get_lidar_and_img.py')
         tree = ast.parse(path.read_text())
         functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ('to_image_message', 'to_depth_message')]
         self.assertEqual(len(functions), 2, 'color and raw depth conversions are required')
