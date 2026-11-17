@@ -1,8 +1,8 @@
 # Astribot live observation examples
 
-This folder contains eight selected/adapted scripts from `examples/` plus combined
-image/lidar and joint/pose scripts for development on the receiving computer. Six monitors run
-continuously; the other four scripts are supporting references. These observation
+This folder contains selected/adapted scripts from `examples/`, combined
+image/lidar and joint/pose monitors, and RViz2 visualization files for development
+on the receiving computer. These observation
 scripts do not save sensor data or send joint/motion commands. The separate
 `startup.py` described below does command home motion.
 The originals in `examples/` were left unchanged during this organization pass.
@@ -108,6 +108,68 @@ Pose columns are `[x, y, z, qx, qy, qz, qw]`, with position in meters.
 Refresh defaults to 1 Hz; stop with Ctrl-C. The script reads and prints only: it
 does not publish topics, save files or issue motion commands. The SDK's existing
 startup/control-rights behavior and state freshness limitations still apply.
+
+## Robot model and all Cartesian poses in RViz2
+
+On the computer with a display, source ROS and `env.sh` as above, then run from
+the repository root:
+
+```bash
+ros2 launch ./astribot_scripts/astribot_rviz.launch.py
+# Optional refresh rate (default 10 Hz):
+ros2 launch ./astribot_scripts/astribot_rviz.launch.py rate:=20
+```
+
+No colcon build is needed. This starts `rviz_state.py`, `robot_state_publisher`
+and RViz2 with `astribot_poses.rviz`. It requires the ROS Humble packages
+`rviz2`, `robot_state_publisher`, and the existing SDK environment. The robot
+must already be powered on and activated. Stop the launch with Ctrl-C.
+
+The model follows **current** positions of 20 joints: torso (4), left arm (7),
+right arm (7), and head (2). Labeled axes show **current and desired** Cartesian
+poses for the chassis, torso, both arm end effectors, and head. Red/green/blue
+arrows indicate each pose's local X/Y/Z axes; current axes are opaque and desired
+axes are shorter and translucent. Toggle the two pose displays independently
+in RViz's Displays panel. Gripper openings are not Cartesian poses, and the
+bundled model has no movable gripper or chassis-wheel joints to animate.
+
+| Topic | Standard ROS 2 type |
+| --- | --- |
+| `/astribot_viz/joint_states` | `sensor_msgs/msg/JointState` |
+| `/astribot_viz/current_poses` | `visualization_msgs/msg/MarkerArray` |
+| `/astribot_viz/desired_poses` | `visualization_msgs/msg/MarkerArray` |
+
+The fixed frame is `astribot_viz_chassis`: this view follows the chassis, rather
+than showing world navigation. All Cartesian getters explicitly use `chassis`.
+The model uses the shipped S1 URDF and its configured torso mounting height;
+mesh paths are resolved on the computer running the launch file. TF and robot
+description use `/astribot_viz/` topics to avoid mixing with the driver's TF tree.
+The SDK and original model files are unchanged.
+
+For a **headless robot-connected PC and a separate RViz desktop**, keep a copy
+of this repository on both computers. Source ROS/network settings on both;
+they must share the ROS domain and be able to discover each other. Run:
+
+```bash
+# Robot-connected PC: SDK state only, no Qt or GUI.
+python3 astribot_scripts/rviz_state.py
+
+# Desktop, from its own repository copy: local meshes/model and RViz, no SDK connection.
+ros2 launch ./astribot_scripts/astribot_rviz.launch.py publish_state:=false
+```
+
+The two copies may live at different filesystem paths; the desktop resolves its
+own meshes. Use only one state publisher. For a local launch without RViz,
+`rviz:=false` starts only the SDK publisher and model/TF publisher.
+
+This is a display, not a motion controller. Like the other custom monitors,
+SDK initialization automatically answers Enter but can still acquire control
+when no owner exists. It sends no joint or home-motion commands. Timestamps are
+local polling times because these SDK getters expose no sensor timestamps;
+separate reads are not synchronized and cached SDK data cannot be identified as
+fresh. Invalid samples are skipped, and pose markers expire after publication
+stops; the RobotModel may retain its last joint state. Model-to-SDK calibration
+alignment and live RViz rendering still need verification on the robot.
 
 For camera and lidar together, run **`get_liadra_and_img.py` instead of separate 300/301 processes**:
 
@@ -281,6 +343,11 @@ python3 -m unittest discover -s astribot_scripts -p 'test_*.py'
 Monitor checks substitute ROS, SDK and GUI dependencies before importing scripts.
 `test_sensor_messages.py` additionally uses installed NumPy and real ROS 2 messages
 and serialization to validate pixel packing and header preservation offline.
+`test_rviz_state.py` checks model mesh paths, joint mapping, pose axes/labels,
+invalid data handling, ROS serialization and the mocked SDK polling loop.
+An isolated local ROS smoke check also verified 20 moving-link transforms, the
+fixed chassis mount and robot-description delivery using synthetic joints.
+UDP networking was restricted in that check; it does not validate cross-PC DDS.
 No tests connect to or command a robot. Hardware receipt, DDS compatibility,
 publication rates, image rendering, pose calibration and simultaneous operation
 still require live validation.
