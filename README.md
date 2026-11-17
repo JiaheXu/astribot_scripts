@@ -1,10 +1,47 @@
 # Astribot live observation examples
 
-This folder contains eight selected/adapted scripts from `examples/` plus a combined
-image/lidar script for development on the receiving computer. Five monitors run
-continuously; the other four scripts are supporting references. None saves sensor
-data or sends joint/motion commands.
+This folder contains eight selected/adapted scripts from `examples/` plus combined
+image/lidar and joint/pose scripts for development on the receiving computer. Six monitors run
+continuously; the other four scripts are supporting references. These observation
+scripts do not save sensor data or send joint/motion commands. The separate
+`startup.py` described below does command home motion.
 The originals in `examples/` were left unchanged during this organization pass.
+
+## Move an activated robot home
+
+After powering on and activating the robot through the existing interface, source
+the ROS/SDK environment and run:
+
+```bash
+python3 astribot_scripts/startup.py
+```
+
+This script calls the SDK's `move_to_home()` with its existing collision checks.
+It retains the normal SDK control-rights prompt; motion requires control rights.
+It does not automate power-on or robot activation, and it does not silently take
+control from another controller. The home pose moves torso, both arms, head and
+both grippers (opens them); it does not move the chassis.
+
+The completion window is **10 seconds after connection/control acquisition**.
+The unmodified SDK caps home-motion duration at about **5 seconds**, so requesting
+10 seconds does not produce a 10-second trajectory. The native motion call blocks;
+the deadline can only be checked once it returns, not enforced as an independent
+watchdog while that call is running.
+
+After the call returns, the script checks current joint positions against the
+SDK home target every 0.1 seconds. Tolerances are 0.02 rad for torso/arms/head and
+2 SDK opening units for grippers. These are feedback checks using the SDK's
+reported state, not independent sensing or source-timestamp validation.
+Successful verification prints:
+
+```text
+[STARTUP] Start up process is done. Home position confirmed.
+```
+
+Rejected motion, lost feedback/control or an expired deadline prints an error and
+exits nonzero. After a motion request, failures and Ctrl-C attempt `stop_robot()`
+only if control is still owned. A failed stop request is also logged. No successful
+completion message is printed for a failed check. The SDK source is unchanged.
 
 ## Run on the receiving computer
 
@@ -21,7 +58,7 @@ The current `env.sh` sets `ROBOT_TYPE=S1`, `ROS_DOMAIN_ID=25`, Fast DDS, and a
 robot must have compatible ROS discovery/network settings. Use the SDK's Python
 environment (the bundled middleware targets Python 3.10).
 
-**Camera (300), lidar (301), and combined streaming (303) automatically answer the SDK prompt with Enter.**
+**Camera (300), lidar (301), combined streaming (`get_liadra_and_img.py`), and `get_joints_and_poses.py` automatically answer the SDK prompt with Enter.**
 Only during `Astribot()` construction, these custom scripts temporarily replace
 `input()` with an empty response. Normal input is restored afterwards, including
 when initialization fails. No SDK source changes are required. The SDK may still
@@ -30,7 +67,7 @@ the scripts subscribe to the sensor messages published by the robot's drivers.
 
 The other scripts still use the SDK's default control-rights handling. When another
 controller is running, press **Enter**, not `yes`, at their control-rights prompt
-to continue without taking control. In **all** scripts, including 300, 301 and 303,
+to continue without taking control. In **all** scripts, including 300, 301 and `get_liadra_and_img.py`,
 the unchanged SDK can still claim control automatically if no owner is found.
 The automatic Enter response declines takeover when another owner is present;
 it does not disable acquisition altogether. SDK background services still run. See
@@ -40,42 +77,58 @@ Run the following in separate terminals as needed:
 
 ```bash
 # Live color images: default is head_rgbd; select additional cameras explicitly.
-python3 custom/300-get_images.py --cameras head_rgbd left_wrist_rgbd right_wrist_rgbd
+python3 astribot_scripts/300-get_images.py --cameras head_rgbd left_wrist_rgbd right_wrist_rgbd
 # For a terminal without a display, add --headless (counts, no JPEG decoding).
 
 # Both complete PointCloud2 streams; prints scan/point counts and receive rate.
-python3 custom/301-get_lidar_scan.py
+python3 astribot_scripts/301-get_lidar_scan.py
 # Optional bounded session:
-python3 custom/301-get_lidar_scan.py --duration 60
+python3 astribot_scripts/301-get_lidar_scan.py --duration 60
 
 # All parts: current and desired joint positions, velocities and torques.
-python3 custom/101-get_joint_states.py --rate 5
+python3 astribot_scripts/101-get_joint_states.py --rate 5
 
 # Both arms: current and desired EE poses, with the same reference frame.
-python3 custom/102-get_cartesian_states.py --rate 5 --frame chassis
+python3 astribot_scripts/102-get_cartesian_states.py --rate 5 --frame chassis
 ```
 
-For camera and lidar together, run **303 instead of separate 300/301 processes**:
+For joint and Cartesian data in a single terminal and SDK connection:
 
 ```bash
-python3 custom/303-get_images_and_lidar.py --cameras head_rgbd left_wrist_rgbd right_wrist_rgbd
-# Without a display:
-python3 custom/303-get_images_and_lidar.py --cameras head_rgbd left_wrist_rgbd right_wrist_rgbd --headless
+python3 astribot_scripts/get_joints_and_poses.py
+python3 astribot_scripts/get_joints_and_poses.py --rate 5 --frame world
 ```
 
-303 uses one SDK connection, automatically activates both camera and lidar drivers,
+This combines the getters from examples 101 and 102. It prints current and desired
+joint positions, velocities and torques for every part, plus current and desired
+Cartesian poses of the chassis, torso, both arms (EE poses) and head. Gripper
+openings remain in the joint tables and are excluded from the 7D pose tables.
+Both current and desired poses use the selected `--frame` (default `chassis`).
+Pose columns are `[x, y, z, qx, qy, qz, qw]`, with position in meters.
+Refresh defaults to 1 Hz; stop with Ctrl-C. The script reads and prints only: it
+does not publish topics, save files or issue motion commands. The SDK's existing
+startup/control-rights behavior and state freshness limitations still apply.
+
+For camera and lidar together, run **`get_liadra_and_img.py` instead of separate 300/301 processes**:
+
+```bash
+python3 astribot_scripts/get_liadra_and_img.py --cameras head_rgbd left_wrist_rgbd right_wrist_rgbd
+```
+
+`get_liadra_and_img.py` uses one SDK connection, automatically activates both camera and lidar drivers,
 and receives their existing topics. It does not reset lidar before activation.
 The camera driver publishes
 `/astribot_camera/<camera>/color_compress/compressed` (`sensor_msgs/msg/CompressedImage`);
 the lidar driver publishes `/livox/lidar_front` and `/livox/lidar_back`
-(`sensor_msgs/msg/PointCloud2`). Without `--cameras`, 303 receives `head_rgbd` plus both
+(`sensor_msgs/msg/PointCloud2`). Without `--cameras`, `get_liadra_and_img.py` receives `head_rgbd` plus both
 lidars. These input types are already standard ROS 2 messages, despite the
-`astribot` names in the camera topic paths. 303 additionally publishes decoded
+`astribot` names in the camera topic paths. `get_liadra_and_img.py` additionally publishes decoded
 images and relays complete lidar messages on these separate output topics:
 
 | Output topic | ROS 2 message type | Content |
 | --- | --- | --- |
 | `/sdk/astribot_camera/<camera>/color_image` | `sensor_msgs/msg/Image` | Full-resolution, uncompressed `bgr8` color pixels |
+| `/sdk/astribot_camera/head_rgbd/depth_image` | `sensor_msgs/msg/Image` | Raw `16UC1` head depth, 640×576 by default |
 | `/sdk/astribot_lidar/front_scan` | `sensor_msgs/msg/PointCloud2` | Complete front point cloud |
 | `/sdk/astribot_lidar/back_scan` | `sensor_msgs/msg/PointCloud2` | Complete back point cloud |
 
@@ -87,11 +140,45 @@ custom message types. It uses Best Effort, volatile QoS with queue depth 10 for
 these outputs; downstream subscribers should use sensor-data/Best Effort QoS.
 Avoid another publisher on the same output topics.
 
-`--headless` disables only the GUI in 303: images are still decoded and published.
-Uncompressed images require more bandwidth than the compressed input. 303 displays
-selected color images and prints image/scan/point counts once
-per second. Stop with Ctrl-C or `q` in an image window. Both drivers remain running
-after exit, including if activation of one driver fails after the other succeeded.
+`get_liadra_and_img.py` always runs without a GUI, including when no flags are supplied. It never
+opens windows or calls OpenCV GUI functions; no Qt display setup is needed.
+`--headless` is accepted for compatibility but is no longer required. The SDK
+still uses OpenCV to decode JPEG pixels for standard Image publishing.
+Uncompressed images require more bandwidth than the compressed input. `get_liadra_and_img.py` prints
+image/scan/point counts once per second. Stop with Ctrl-C. Both drivers remain
+running after exit, including if activation of one driver fails after the other
+succeeded.
+
+### Head RGB/depth in RViz2
+
+With `head_rgbd` selected (the default), the combined script also subscribes to
+`/astribot_camera/head_rgbd/depth_compress` as standard `CompressedImage`.
+The remote sample has `format: raw`, 737,280 payload bytes and an empty frame ID.
+The configured layout is 640×576 uint16, confirmed in this session; each frame's
+byte count is checked before publishing. No `astribot_camera` message package is
+needed. Depth is subscribed directly so it cannot replace the SDK color callback.
+
+Depth byte order defaults to **little-endian**; use `--depth-big-endian` if the
+source uses big-endian. Use `--head-depth-size WIDTH HEIGHT` if the driver resolution
+changes. Pixel values are preserved without scaling; their physical unit has not
+been independently verified. Do not assume calibrated meters from this image.
+The original timestamp and frame ID (including an empty one) are preserved.
+
+Run the script on the robot-connected computer and open RViz2 on a computer with
+a display and matching ROS network settings. Add two **Image** displays:
+
+| Display | Topic | Settings |
+| --- | --- | --- |
+| Head color | `/sdk/astribot_camera/head_rgbd/color_image` | Transport: raw; Reliability: Best Effort |
+| Head depth | `/sdk/astribot_camera/head_rgbd/depth_image` | Transport: raw; Reliability: Best Effort; Normalize Range: enabled |
+
+The output is numeric depth, not a JPEG or a colorized 8-bit depth picture.
+RViz2's Image renderer supports `16UC1` and normalizes it for display
+([Humble renderer source](https://github.com/ros2/rviz/blob/humble/rviz_default_plugins/src/rviz_default_plugins/displays/image/ros_image_texture.cpp)).
+Use Image displays for these 2D views. A calibrated Camera display or a depth-derived
+3D cloud would additionally require real CameraInfo/TF and verified depth units;
+this script does not fabricate calibration or align depth to color. RViz rendering
+and live depth receipt have not been verified on the robot.
 
 Joint and EE monitors refresh at **1 Hz by default**. `--rate` is the requested
 display/polling rate, not a guaranteed sensor rate or real-time deadline. Stop with
@@ -109,9 +196,10 @@ as an explicit alias for lidar's default. No monitor writes images or rosbag fil
 | --- | --- | --- |
 | `300-get_images.py` | `image_callback(topic_name, msg, width, height, array)` | Continuous color subscriptions; GUI keeps only the newest image per camera |
 | `301-get_lidar_scan.py` | `LidarMonitor.lidar_callback(name, msg)` | Continuous front/back `PointCloud2`; all original fields are available in `msg` |
-| `303-get_images_and_lidar.py` | `image_callback(...)` and `lidar_callback(name, msg)` | Automatic activation, raw Image publishing and complete PointCloud2 relay using one SDK connection |
+| `get_liadra_and_img.py` | `image_callback(...)` and `lidar_callback(name, msg)` | Automatic activation, raw Image publishing and complete PointCloud2 relay using one SDK connection |
 | `101-get_joint_states.py` | `report(astribot)` and `get_current_joints_*()` | Continuous polling; desired values are commands, not measurements |
 | `102-get_cartesian_states.py` | `report(astribot, frame)` | Continuous polling of both arms' SDK EE poses |
+| `get_joints_and_poses.py` | `report(astribot, frame)` | Combined current/desired joint and Cartesian tables, one SDK connection |
 | `100-get_robot_properties.py` | Names, DOFs, position/velocity/torque limits | One snapshot; corrected the original's reversed lower/upper limit assignment |
 | `204-forward_kinematics.py` | `get_forward_kinematics(names, joints_position)` | One calculation using hard-coded example joint values, not live measurements |
 | `205-inverse_kinematics.py` | `get_inverse_kinematics(names, cartesian_pose)` | One calculation using hard-coded target poses; no motion command |
@@ -120,10 +208,10 @@ as an explicit alias for lidar's default. No monitor writes images or rosbag fil
 The camera topics are `/astribot_camera/<camera>/color_compress/compressed`.
 Available selections are `head_rgbd`, `torso_rgbd`, `left_wrist_rgbd`,
 `right_wrist_rgbd`, and `head_stereo`. Display arrays are BGR. In 300, headless mode
-receives compressed bytes; 303 always decodes for standard Image publishing.
-The custom monitors cover color only: the original does not
-implement depth decoding either, and the SDK returns raw bytes for non-JPEG data.
-Stereo splitting, depth decoding and camera calibration are not supplied here.
+receives compressed bytes; `get_liadra_and_img.py` always decodes for standard Image publishing.
+The combined script additionally wraps the configured head raw depth as `16UC1`;
+other cameras remain color-only. Stereo splitting, depth/color registration and
+camera calibration are not supplied here.
 
 Lidar topics are `/livox/lidar_front` and `/livox/lidar_back`, with Best Effort QoS.
 Use `msg.header.stamp` and `msg.header.frame_id` inside image/lidar callbacks for
@@ -187,7 +275,7 @@ were not copied. The camera rewrite removes the original undefined
 ## Offline verification
 
 ```bash
-python3 -m unittest discover -s custom -p 'test_*.py'
+python3 -m unittest discover -s astribot_scripts -p 'test_*.py'
 ```
 
 Monitor checks substitute ROS, SDK and GUI dependencies before importing scripts.

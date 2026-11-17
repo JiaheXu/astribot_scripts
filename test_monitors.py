@@ -65,7 +65,7 @@ class MonitorTests(unittest.TestCase):
                 self.ros.shutdown.assert_called_once()
 
     def test_invalid_refresh_rate_rejected_before_connecting(self):
-        for filename in ('101-get_joint_states.py', '102-get_cartesian_states.py'):
+        for filename in ('101-get_joint_states.py', '102-get_cartesian_states.py', 'get_joints_and_poses.py'):
             module = self.load(filename)
             self.assertTrue(callable(getattr(module, 'main', None)))
             for rate in ('0', '-1', 'nan', 'inf'):
@@ -74,6 +74,36 @@ class MonitorTests(unittest.TestCase):
                         self.run_main(module, ['--rate', rate])
                     self.assertEqual(result.exception.code, 2)
             self.modules['astribot_sdk.core.astribot_api.astribot_client'].Astribot.assert_not_called()
+
+    def test_combined_joints_and_poses_refreshes_both_states_in_selected_frame(self):
+        module = self.load('get_joints_and_poses.py')
+        self.robot.whole_body_names = ['arm', 'gripper']
+        self.robot.effector_names = ['gripper']
+        for state in ('current', 'desired'):
+            for quantity in ('position', 'velocity', 'torque'):
+                getattr(self.robot, f'get_{state}_joints_{quantity}').return_value = [[1, 2], [50]]
+            getattr(self.robot, f'get_{state}_cartesian_pose').return_value = [[1, 2, 3, 0, 0, 0, 1]]
+        self.ros.ok.side_effect = [True, True, False, True]
+        output = self.run_main(module, ['--rate', '5', '--frame', 'world'])
+        for state in ('current', 'desired'):
+            for quantity in ('position', 'velocity', 'torque'):
+                self.assertEqual(getattr(self.robot, f'get_{state}_joints_{quantity}').call_count, 2)
+            getter = getattr(self.robot, f'get_{state}_cartesian_pose')
+            self.assertEqual(getter.call_count, 2)
+            self.assertEqual(getter.call_args.kwargs, {'names': ['arm'], 'frame': 'world'})
+        self.assertIn('frame=world', output)
+        self.assertIn('gripper', output)
+        self.robot.astribot_interface.node.create_publisher.assert_not_called()
+        self.ros.shutdown.assert_called_once()
+
+    def test_combined_reader_rejects_missing_part_data_and_closes(self):
+        module = self.load('get_joints_and_poses.py')
+        self.robot.effector_names = []
+        self.robot.get_current_joints_position.return_value = []
+        with patch.object(sys, 'argv', ['monitor']), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, 'Incomplete current joint position data'):
+                module.main()
+        self.ros.shutdown.assert_called_once()
 
     def test_lidar_leaves_running_driver_alone_by_default(self):
         module = self.load('301-get_lidar_scan.py')
@@ -107,7 +137,7 @@ class MonitorTests(unittest.TestCase):
         self.ros.shutdown.assert_called_once()
 
     def test_startup_answers_enter_and_restores_input(self):
-        for filename in ('300-get_images.py', '301-get_lidar_scan.py', '303-get_images_and_lidar.py'):
+        for filename in ('300-get_images.py', '301-get_lidar_scan.py', 'get_liadra_and_img.py', 'get_joints_and_poses.py'):
             for fails in (False, True):
                 with self.subTest(filename=filename, fails=fails):
                     module = self.load(filename)
@@ -120,7 +150,9 @@ class MonitorTests(unittest.TestCase):
                     self.modules['astribot_sdk.core.astribot_api.astribot_client'].Astribot.side_effect = connect
                     self.ros.ok.side_effect = [False, True]
                     def start():
-                        if not filename.startswith('301'):
+                        if filename == 'get_joints_and_poses.py':
+                            self.run_main(module, [])
+                        elif not filename.startswith('301'):
                             self.run_main(module, ['--headless'])
                         else:
                             module.LidarMonitor().close()
@@ -134,16 +166,22 @@ class MonitorTests(unittest.TestCase):
                     self.assertEqual(answers, [''])
 
     def test_combined_stream_publishes_standard_images_and_original_clouds(self):
-        module = self.load('303-get_images_and_lidar.py')
+        module = self.load('get_liadra_and_img.py')
         node = self.robot.astribot_interface.node
+        for name in ('imshow', 'waitKey', 'destroyAllWindows'):
+            getattr(self.modules['cv2'], name).side_effect = AssertionError('GUI must never be used')
         publishers, clouds, images = {}, {}, {}
+        depth = Mock(format='raw', data=bytes(640 * 576 * 2))
         pixels = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
         def publisher(message_type, topic, qos):
             publishers[topic] = Mock()
             return publishers[topic]
         def subscribe_lidar(message_type, topic, callback, qos):
-            clouds[topic] = Mock(width=5, height=2)
-            callback(clouds[topic])
+            if topic.endswith('/depth_compress'):
+                callback(depth)
+            else:
+                clouds[topic] = Mock(width=5, height=2)
+                callback(clouds[topic])
             return topic
         def subscribe_image(camera, kind, callback, need_decode):
             self.assertTrue(need_decode, 'headless output still needs decoded pixels')
@@ -154,30 +192,36 @@ class MonitorTests(unittest.TestCase):
         node.create_subscription.side_effect = subscribe_lidar
         self.robot.register_image_callback.side_effect = subscribe_image
         self.ros.ok.side_effect = [True, False, True]
-        output = self.run_main(module, ['--cameras', 'head_rgbd', 'left_wrist_rgbd', '--headless'])
+        output = self.run_main(module, ['--cameras', 'head_rgbd', 'left_wrist_rgbd'])
         self.modules['astribot_sdk.core.astribot_api.astribot_client'].Astribot.assert_called_once_with()
         self.robot.activate_camera.assert_called_once_with()
         self.robot.activate_lidar.assert_called_once_with()
         self.assertEqual([call.args[1] for call in node.create_subscription.call_args_list],
-                         ['/livox/lidar_front', '/livox/lidar_back'])
+                         ['/livox/lidar_front', '/livox/lidar_back', '/astribot_camera/head_rgbd/depth_compress'])
         self.assertEqual(set(publishers), {
             '/sdk/astribot_camera/head_rgbd/color_image',
             '/sdk/astribot_camera/left_wrist_rgbd/color_image',
-            '/sdk/astribot_lidar/front_scan', '/sdk/astribot_lidar/back_scan'})
+            '/sdk/astribot_lidar/front_scan', '/sdk/astribot_lidar/back_scan',
+            '/sdk/astribot_camera/head_rgbd/depth_image'})
         for camera, source in images.items():
             published = publishers[f'/sdk/astribot_camera/{camera}/color_image'].publish.call_args.args[0]
             self.assertIs(published.header, source.header)
             self.assertEqual((published.height, published.width, published.step), (2, 2, 6))
             self.assertEqual(published.encoding, 'bgr8')
             self.assertEqual(published.data, pixels.tobytes())
+        published_depth = publishers['/sdk/astribot_camera/head_rgbd/depth_image'].publish.call_args.args[0]
+        self.assertIs(published_depth.header, depth.header)
+        self.assertEqual(published_depth.encoding, '16UC1')
+        self.assertEqual((published_depth.width, published_depth.height), (640, 576))
+        self.assertEqual(bytes(published_depth.data), depth.data)
         for name in ('front', 'back'):
             published = publishers[f'/sdk/astribot_lidar/{name}_scan'].publish.call_args.args[0]
             self.assertIs(published, clouds[f'/livox/lidar_{name}'])
         self.assertIn("'head_rgbd': 1", output)
         self.assertIn('front: 1 scans, 10 points', output)
         self.assertIn('back: 1 scans, 10 points', output)
-        self.assertEqual(node.destroy_subscription.call_count, 4)
-        self.assertEqual(node.destroy_publisher.call_count, 4)
+        self.assertEqual(node.destroy_subscription.call_count, 5)
+        self.assertEqual(node.destroy_publisher.call_count, 5)
         self.robot.deactivate_camera.assert_not_called()
         self.robot.deactivate_lidar.assert_not_called()
         self.ros.shutdown.assert_called_once()
@@ -185,7 +229,7 @@ class MonitorTests(unittest.TestCase):
     def test_combined_stream_reports_activation_failure(self):
         for driver in ('camera', 'lidar'):
             with self.subTest(driver=driver):
-                module = self.load('303-get_images_and_lidar.py')
+                module = self.load('get_liadra_and_img.py')
                 getattr(self.robot, f'activate_{driver}').return_value = False
                 with self.assertRaisesRegex(RuntimeError, 'activation failed'):
                     self.run_main(module, ['--headless'])
