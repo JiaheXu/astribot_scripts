@@ -15,19 +15,13 @@ Pose order: x, y, z (meters), qx, qy, qz, qw.
 """
 
 import argparse
-import math
 import time
 
 import rclpy
 from tabulate import tabulate
 from astribot_sdk.core.astribot_api.astribot_client import Astribot
 
-
-def positive_rate(value):
-    rate = float(value)
-    if not math.isfinite(rate) or rate <= 0:
-        raise argparse.ArgumentTypeError("rate must be finite and positive")
-    return rate
+from astribot_scripts.common.cli import positive_rate
 
 
 def report(astribot, frame):

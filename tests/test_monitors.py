@@ -32,10 +32,16 @@ class MonitorTests(unittest.TestCase):
         modules['astribot_sdk.core.astribot_api.astribot_client'].Astribot.return_value = self.robot
         modules['tabulate'].tabulate.side_effect = lambda rows, **kwargs: repr(rows)
         self.modules = modules
-        path = Path(__file__).parent / filename
+        path = Path(__file__).resolve().parents[1] / filename
         spec = importlib.util.spec_from_file_location('monitor_under_test', path)
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, modules):
+            # Load shared helpers with the same ROS message doubles as the command.
+            sensor_spec = importlib.util.spec_from_file_location(
+                'astribot_scripts.common.sensors', path.parent / 'common/sensors.py')
+            sensors = importlib.util.module_from_spec(sensor_spec)
+            sensor_spec.loader.exec_module(sensors)
+            sys.modules[sensor_spec.name] = sensors
             spec.loader.exec_module(module)
         return module
 
@@ -275,7 +281,7 @@ class MonitorTests(unittest.TestCase):
         self.robot.get_joints_velocity_limit.return_value = [[4, 4]]
         self.robot.get_joints_torque_limit.return_value = [[5, 5]]
         with patch.dict(sys.modules, self.modules), contextlib.redirect_stdout(io.StringIO()) as output:
-            runpy.run_path(str(Path(__file__).parent / '100-get_robot_properties.py'), run_name='__main__')
+            runpy.run_path(str(Path(__file__).resolve().parents[1] / '100-get_robot_properties.py'), run_name='__main__')
         self.assertIn("['arm', [2, 3], [-2, -3], [4, 4], [5, 5]]", output.getvalue())
 
 

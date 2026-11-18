@@ -1,0 +1,9 @@
+# Required: T_base_cloud maps actual PointCloud2 coordinates into SDK chassis
+# coordinates: p_base = R_base_cloud * p_cloud + t_base_cloud (meters).
+# A topic called lidar_back can already contain points transformed by the driver.
+# Do not substitute the physical rear-sensor mount without checking that contract.
+cloud_frame: livox_frame
+base_from_cloud: null
+# Replace null with the calibrated 4x4 rigid transform, including [0, 0, 0, 1]
+# as the final row. Missing calibration intentionally prevents base publication.
+# Search findings and the unverified vendor candidate are documented in README.md.

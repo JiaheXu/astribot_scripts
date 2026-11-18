@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 class StartupTests(unittest.TestCase):
     def setUp(self):
-        path = Path(__file__).with_name('startup.py')
+        path = Path(__file__).resolve().parents[1] / 'startup.py'
         self.assertTrue(path.exists(), 'startup script must exist')
         spec = importlib.util.spec_from_file_location('startup_under_test', path)
         self.module = importlib.util.module_from_spec(spec)
@@ -29,7 +29,7 @@ class StartupTests(unittest.TestCase):
             spec.loader.exec_module(self.module)
 
     def test_home_constants_match_sdk_calibration(self):
-        path = Path(__file__).parents[1] / 'astribot_sdk/core/astribot_api/astribot_client.py'
+        path = Path(__file__).resolve().parents[2] / 'astribot_sdk/core/astribot_api/astribot_client.py'
         tree = ast.parse(path.read_text())
         method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == 'move_to_home')
         values = {}

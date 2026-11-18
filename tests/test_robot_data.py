@@ -16,9 +16,9 @@ from builtin_interfaces.msg import Time
 from rclpy.serialization import deserialize_message, serialize_message
 from sensor_msgs.msg import Imu, JointState
 
-import publish_robot_data as data
-from get_lidar_and_img import SensorPublisher
-from rviz_state import FRAME, MODEL_JOINTS, POSE_PARTS
+from astribot_scripts import publish_robot_data as data
+from astribot_scripts.common.sensors import SensorPublisher
+from astribot_scripts.common.state import FRAME, MODEL_JOINTS, POSE_PARTS
 
 
 def robot_fixture():
@@ -128,7 +128,7 @@ class RobotDataTests(unittest.TestCase):
                          len(valid) + 1)
 
     def test_recording_command_selects_sensors_and_state_without_shell_expansion(self):
-        script = Path(__file__).with_name('record_robot_data.sh')
+        script = Path(__file__).resolve().parents[1] / 'record_robot_data.sh'
         with tempfile.TemporaryDirectory() as directory:
             ros2 = Path(directory) / 'ros2'
             ros2.write_text('#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\n')

@@ -1,12 +1,35 @@
-# Astribot live observation examples
+# Astribot scripts
 
-This folder contains selected/adapted scripts from `examples/`, combined
-image/lidar and joint/pose monitors, and RViz2 visualization files for development
-on the receiving computer. These observation
-publishers do not save sensor data or send joint/motion commands. The optional
-`record_robot_data.sh` saves a ROS bag. The separate
-`startup.py` described below does command home motion.
-The originals in `examples/` were left unchanged during this organization pass.
+Command-line tools for S1 observation, sensor/state publishing, recording, RViz,
+and startup. Observation tools issue no joint/motion commands; `startup.py`
+commands home motion and `record_robot_data.sh` writes a ROS bag.
+
+## Layout
+
+```text
+astribot_scripts/
+├── *.py                 # Existing executable commands (including numbered examples)
+├── record_robot_data.sh # ROS bag recorder
+├── common/
+│   ├── cli.py           # Shared argument validation
+│   ├── sensors.py       # Image/depth conversion and sensor publishing
+│   └── state.py         # S1 model, joint mapping and pose markers
+├── launch/              # ROS 2 launch files
+├── config/              # RViz settings, recording QoS and calibration template
+├── docs/                # Camera and IMU mounting references
+└── tests/               # Offline unit tests; SDK connections are mocked
+```
+
+Executable filenames and flags are preserved. The old root-level launch,
+RViz and YAML paths are relative symlinks to their canonical locations, so
+existing commands and calibration-file edits still work. Preserve symlinks
+when copying this folder. The `examples/` originals and SDK remain unchanged.
+
+Import reusable code from `astribot_scripts.common`; executable scripts retain
+previously exposed helper names for compatibility. Source `env.sh` before
+running commands so the repository root is on `PYTHONPATH`. No package install
+or colcon build is required. Named commands also support module execution,
+for example `python3 -m astribot_scripts.publish_robot_data --help`.
 
 ## Move an activated robot home
 
@@ -176,7 +199,7 @@ received counts. The publisher itself never starts recording automatically.
 For live robot-model visualization alongside the combined publisher:
 
 ```bash
-ros2 launch ./astribot_scripts/astribot_rviz.launch.py publish_state:=false
+ros2 launch ./astribot_scripts/launch/astribot_rviz.launch.py publish_state:=false
 ```
 
 For offline model/FK replay, stop live publishers and use an isolated ROS domain
@@ -184,7 +207,7 @@ in both replay terminals:
 
 ```bash
 export ROS_DOMAIN_ID=125
-ros2 launch ./astribot_scripts/astribot_rviz.launch.py publish_state:=false use_sim_time:=true
+ros2 launch ./astribot_scripts/launch/astribot_rviz.launch.py publish_state:=false use_sim_time:=true
 # Second terminal, same domain:
 ros2 bag play ./robot_data_run01 --clock
 ```
@@ -202,23 +225,23 @@ units; calibrated IMU fusion and RGB-D reconstruction need those separately.
 ## Robot model and all Cartesian poses in RViz2
 
 For nominal camera offsets relative to head, torso and wrist joint/link frames,
-see [camera_mounts_reference.md](camera_mounts_reference.md). It records official
+see [camera_mounts_reference.md](docs/camera_mounts_reference.md). It records official
 S1 MJCF sources, composed wrist offsets and the camera-to-ROS optical-axis
 conversion; these mounts are not automatically published as calibrated TF.
-For the chassis and both LiDAR IMUs, see [imu_mounts_reference.md](imu_mounts_reference.md),
+For the chassis and both LiDAR IMUs, see [imu_mounts_reference.md](docs/imu_mounts_reference.md),
 including poses composed into the model's chassis frame and ROS-order quaternions.
 
 On the computer with a display, source ROS and `env.sh` as above, then run from
 the repository root:
 
 ```bash
-ros2 launch ./astribot_scripts/astribot_rviz.launch.py
+ros2 launch ./astribot_scripts/launch/astribot_rviz.launch.py
 # Optional refresh rate (default 10 Hz):
-ros2 launch ./astribot_scripts/astribot_rviz.launch.py rate:=20
+ros2 launch ./astribot_scripts/launch/astribot_rviz.launch.py rate:=20
 ```
 
 No colcon build is needed. This starts `rviz_state.py`, `robot_state_publisher`
-and RViz2 with `astribot_poses.rviz`. It requires the ROS Humble packages
+and RViz2 with `config/astribot_poses.rviz`. It requires the ROS Humble packages
 `rviz2`, `robot_state_publisher`, and the existing SDK environment. The robot
 must already be powered on and activated. Stop the launch with Ctrl-C.
 
@@ -252,7 +275,7 @@ they must share the ROS domain and be able to discover each other. Run:
 python3 astribot_scripts/rviz_state.py
 
 # Desktop, from its own repository copy: local meshes/model and RViz, no SDK connection.
-ros2 launch ./astribot_scripts/astribot_rviz.launch.py publish_state:=false
+ros2 launch ./astribot_scripts/launch/astribot_rviz.launch.py publish_state:=false
 ```
 
 The two copies may live at different filesystem paths; the desktop resolves its
@@ -291,7 +314,7 @@ kiss_rear_odom
             └─ torso / arms / head
 ```
 
-**Calibration is still missing.** `rear_lidar_to_base.yaml` intentionally has
+**Calibration is still missing.** `config/rear_lidar_to_base.yaml` intentionally has
 `base_from_cloud: null`. Fill it with `T_base_cloud`, the rigid transform that
 maps the actual input cloud's coordinates to SDK chassis coordinates, in meters:
 `p_base = R_base_cloud * p_cloud + t_base_cloud`. Its rotation must be orthonormal
@@ -347,10 +370,10 @@ After supplying the correct matrix, run from the repository root:
 
 ```bash
 # Same computer: SDK state + base conversion + model + RViz.
-ros2 launch ./astribot_scripts/astribot_rviz.launch.py odometry:=true
+ros2 launch ./astribot_scripts/launch/astribot_rviz.launch.py odometry:=true
 
 # Separate desktop: rviz_state.py already runs on the robot-connected PC.
-ros2 launch ./astribot_scripts/astribot_rviz.launch.py \
+ros2 launch ./astribot_scripts/launch/astribot_rviz.launch.py \
   odometry:=true publish_state:=false
 ```
 
@@ -361,7 +384,7 @@ enable **Original LiDAR odometry (reference)**; disable RobotModel/current/
 desired/base-odometry displays until their transforms are available:
 
 ```bash
-rviz2 -d ./astribot_scripts/astribot_poses.rviz --ros-args \
+rviz2 -d ./astribot_scripts/config/astribot_poses.rviz --ros-args \
   -r /tf:=/astribot_viz/tf -r /tf_static:=/astribot_viz/tf_static
 ```
 
@@ -548,8 +571,11 @@ were not copied. The camera rewrite removes the original undefined
 ## Offline verification
 
 ```bash
-python3 -m unittest discover -s astribot_scripts -p 'test_*.py'
+source /opt/ros/humble/setup.bash
+python3 -m unittest discover -s astribot_scripts/tests -p 'test_*.py'
 ```
+
+The former discovery command with `-s astribot_scripts` also works.
 
 Monitor checks substitute ROS, SDK and GUI dependencies before importing scripts.
 `test_sensor_messages.py` additionally uses installed NumPy and real ROS 2 messages

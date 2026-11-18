@@ -11,7 +11,6 @@ written. --rate defaults to 1 Hz; --frame defaults to chassis. Ctrl-C stops.
 """
 
 import argparse
-import math
 import time
 from unittest.mock import patch
 
@@ -19,12 +18,7 @@ import rclpy
 from tabulate import tabulate
 from astribot_sdk.core.astribot_api.astribot_client import Astribot
 
-
-def positive_rate(value):
-    rate = float(value)
-    if not math.isfinite(rate) or rate <= 0:
-        raise argparse.ArgumentTypeError('rate must be finite and positive')
-    return rate
+from astribot_scripts.common.cli import positive_rate
 
 
 def report(astribot, frame):

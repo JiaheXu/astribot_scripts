@@ -9,7 +9,7 @@ from nav_msgs.msg import Odometry
 from rclpy.serialization import deserialize_message, serialize_message
 import yaml
 
-import rear_lidar_odometry as adapter
+from astribot_scripts import rear_lidar_odometry as adapter
 
 
 class RearOdometryTests(unittest.TestCase):
@@ -73,7 +73,7 @@ class RearOdometryTests(unittest.TestCase):
             adapter.convert(msg, np.eye(4), 'livox_frame')
 
     def test_calibration_is_required_and_reflections_are_rejected(self):
-        template = Path(__file__).with_name('rear_lidar_to_base.yaml')
+        template = Path(__file__).resolve().parents[1] / 'config/rear_lidar_to_base.yaml'
         with self.assertRaises(ValueError):
             adapter.load_calibration(template)
         with tempfile.TemporaryDirectory() as directory:

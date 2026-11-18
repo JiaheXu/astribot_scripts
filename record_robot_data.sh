@@ -7,5 +7,5 @@ if (( $# > 1 )); then
 fi
 bag_dir="${1:-robot_data_$(date +%Y%m%d_%H%M%S)}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-exec ros2 bag record -o "$bag_dir" --qos-profile-overrides-path "$script_dir/record_qos.yaml" \
+exec ros2 bag record -o "$bag_dir" --qos-profile-overrides-path "$script_dir/config/record_qos.yaml" \
     --regex '^(/sdk/.*|/astribot_viz/(joint_states|current_poses|desired_poses)|/livox/(lidar|imu)_(front|back)|/astribot_whole_body/imu_sensor/astribot_chassis_imu_site)$'

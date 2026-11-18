@@ -1,0 +1,122 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 35; 35; 40
+    Fixed Frame: kiss_rear_odom
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Rear KISS local map
+      Enabled: true
+      Topic:
+        Value: /kiss/rear/local_map
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Position Transformer: XYZ
+      Color Transformer: AxisColor
+      Axis: Z
+      Style: Points
+      Size (Pixels): 2
+      Alpha: 1
+      Decay Time: 0
+    - Class: rviz_default_plugins/Odometry
+      Name: Robot base odometry
+      Enabled: true
+      Topic:
+        Value: /kiss/base/odometry
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+      Keep: 1000
+      Position Tolerance: 0.02
+      Angle Tolerance: 0.02
+      Shape:
+        Value: Axes
+        Axes Length: 0.25
+        Axes Radius: 0.01
+        Alpha: 1
+      Covariance:
+        Value: false
+    - Class: rviz_default_plugins/Odometry
+      Name: Original LiDAR odometry (reference)
+      Enabled: false
+      Topic:
+        Value: /kiss/rear/odometry
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Keep: 300
+      Shape:
+        Value: Axes
+        Axes Length: 0.12
+        Axes Radius: 0.005
+        Alpha: 0.5
+      Covariance:
+        Value: false
+    - Class: rviz_default_plugins/Grid
+      Name: Ground grid
+      Enabled: true
+      Cell Size: 0.5
+      Plane Cell Count: 10
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/RobotModel
+      Name: Robot (current joints)
+      Enabled: true
+      Alpha: 0.7
+      Visual Enabled: true
+      Collision Enabled: false
+      Description Source: Topic
+      Description Topic:
+        Value: /astribot_viz/robot_description
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Current Cartesian poses
+      Enabled: true
+      Marker Topic:
+        Value: /astribot_viz/current_poses
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Desired Cartesian poses
+      Enabled: true
+      Marker Topic:
+        Value: /astribot_viz/desired_poses
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 3.5
+      Focal Point:
+        X: 0.15
+        Y: 0
+        Z: 0.8
+      Pitch: 0.35
+      Yaw: 0.8
+      Target Frame: <Fixed Frame>
+  Enabled: true
+Window Geometry:
+  Width: 1280
+  Height: 900

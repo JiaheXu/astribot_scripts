@@ -1,6 +1,4 @@
 """Validate real ROS message serialization offline; no ROS node or robot starts."""
-import ast
-from pathlib import Path
 import unittest
 
 import numpy as np
@@ -8,17 +6,12 @@ from rclpy.serialization import deserialize_message, serialize_message
 from sensor_msgs.msg import Image, CompressedImage
 from std_msgs.msg import Header
 
+from astribot_scripts.common.sensors import to_image_message, to_depth_message
+
 
 class ImageMessageTests(unittest.TestCase):
-    def setUp(self):
-        path = Path(__file__).with_name('get_lidar_and_img.py')
-        tree = ast.parse(path.read_text())
-        functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ('to_image_message', 'to_depth_message')]
-        self.assertEqual(len(functions), 2, 'color and raw depth conversions are required')
-        namespace = {'np': np, 'Image': Image}
-        exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), 'exec'), namespace)
-        self.convert = namespace['to_image_message']
-        self.convert_depth = namespace['to_depth_message']
+    convert = staticmethod(to_image_message)
+    convert_depth = staticmethod(to_depth_message)
 
     def test_noncontiguous_pixels_and_header_survive_ros_serialization(self):
         pixels = np.arange(36, dtype=np.uint8).reshape(3, 4, 3)[:, ::2, :]

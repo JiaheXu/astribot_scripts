@@ -10,7 +10,7 @@ from rclpy.serialization import deserialize_message, serialize_message
 from sensor_msgs.msg import JointState
 from visualization_msgs.msg import Marker, MarkerArray
 
-import rviz_state as viz
+from astribot_scripts import rviz_state as viz
 
 
 class VisualizationTests(unittest.TestCase):

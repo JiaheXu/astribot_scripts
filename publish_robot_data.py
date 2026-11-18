@@ -17,8 +17,9 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from visualization_msgs.msg import MarkerArray
 
-from get_lidar_and_img import CAMERAS, SensorPublisher, add_sensor_arguments
-from rviz_state import FRAME, MODEL_JOINTS, POSE_PARTS, joint_message, pose_markers, positive_rate, robot_description
+from astribot_scripts.common.sensors import CAMERAS, SensorPublisher, add_sensor_arguments
+from astribot_scripts.common.cli import positive_rate
+from astribot_scripts.common.state import FRAME, MODEL_JOINTS, POSE_PARTS, joint_message, pose_markers, robot_description
 
 IMU_TOPICS = {
     'front': ('/livox/imu_front', '/sdk/astribot_lidar/front_imu'),

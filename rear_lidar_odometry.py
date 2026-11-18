@@ -114,7 +114,7 @@ class RearBaseOdometry(Node):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--calibration', default=str(Path(__file__).with_name('rear_lidar_to_base.yaml')))
+    parser.add_argument('--calibration', default=str(Path(__file__).resolve().parent / 'config/rear_lidar_to_base.yaml'))
     args, ros_args = parser.parse_known_args()
     try:
         frame, matrix = load_calibration(args.calibration)

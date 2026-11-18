@@ -15,32 +15,12 @@ import time
 from unittest.mock import patch
 
 import cv2
-import numpy as np
 import rclpy
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Image, PointCloud2
 from astribot_sdk.core.astribot_api.astribot_client import Astribot
 
-
-CAMERAS = ("head_rgbd", "torso_rgbd", "left_wrist_rgbd", "right_wrist_rgbd", "head_stereo")
-
-LIDAR_TOPICS = {"front": "/livox/lidar_front", "back": "/livox/lidar_back"}
-
-
-def to_image_message(header, array):
-    """Pack decoded BGR pixels while preserving the source header."""
-    if (not isinstance(array, np.ndarray) or array.dtype != np.uint8
-            or array.ndim != 3 or array.shape[2] != 3
-            or array.shape[0] == 0 or array.shape[1] == 0):
-        raise ValueError("Expected a nonempty uint8 BGR image with shape (height, width, 3)")
-    message = Image()
-    message.header = header
-    message.height, message.width = array.shape[:2]
-    message.encoding = "bgr8"
-    message.is_bigendian = 0
-    message.step = message.width * 3
-    message.data = array.tobytes()
-    return message
+from astribot_scripts.common.sensors import CAMERAS, LIDAR_TOPICS, to_image_message
 
 
 def main():
