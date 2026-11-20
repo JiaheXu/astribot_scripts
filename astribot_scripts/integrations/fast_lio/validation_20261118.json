@@ -1,0 +1,128 @@
+{
+  "date": "2026-11-18",
+  "fast_lio_commit": "2fffc570a25d0df172720bac034fbdb6a13d2162",
+  "input": {
+    "/livox/imu_back": {
+      "messages": 20337,
+      "frame_id": "livox_frame",
+      "header_first_ns": 1794903864458698944,
+      "header_last_ns": 1794903966141850220,
+      "dt_min_max_s": [
+        0.00399303,
+        0.006035
+      ],
+      "nonincreasing_stamps": 0,
+      "arrival_minus_header_median_s": -37.000618872000004,
+      "acc_norm_mean": 0.9902947670224893,
+      "gyro_norm_max": 0.12842381440824188
+    },
+    "/livox/imu_front": {
+      "messages": 20337,
+      "frame_id": "livox_frame",
+      "header_first_ns": 1794903864457174352,
+      "header_last_ns": 1794903966138796498,
+      "dt_min_max_s": [
+        0.003959310000000001,
+        0.006066370000000001
+      ],
+      "nonincreasing_stamps": 0,
+      "arrival_minus_header_median_s": -37.00043436,
+      "acc_norm_mean": 0.9941166681485396,
+      "gyro_norm_max": 0.04430864618738523
+    },
+    "/livox/lidar_back": {
+      "messages": 1017,
+      "frame_id": "livox_frame",
+      "header_first_ns": 1794903864400470624,
+      "header_last_ns": 1794903966000306080,
+      "dt_min_max_s": [
+        0.09984000000000001,
+        0.10033584400000001
+      ],
+      "nonincreasing_stamps": 0,
+      "arrival_minus_header_median_s": -36.878239897,
+      "scan_span_min_max_ms": [
+        99.82976,
+        100.32588799999999
+      ],
+      "first_point_minus_header_min_max_ns": [
+        0.0,
+        0.0
+      ]
+    },
+    "/livox/lidar_front": {
+      "messages": 1017,
+      "frame_id": "livox_frame",
+      "header_first_ns": 1794903864400423892,
+      "header_last_ns": 1794903966000063518,
+      "dt_min_max_s": [
+        0.09984000000000001,
+        0.10033472
+      ],
+      "nonincreasing_stamps": 0,
+      "arrival_minus_header_median_s": -36.876968448,
+      "scan_span_min_max_ms": [
+        99.82976,
+        100.324608
+      ],
+      "first_point_minus_header_min_max_ns": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "replay": {
+    "bag": "/home/fourier/astribot_sdk_ros2/robot_data_run01",
+    "ros_domain_id": 126,
+    "localhost_only": true,
+    "playback_rate": 1.0,
+    "counts": {
+      "lidar": 1016,
+      "imu": 19678,
+      "registered_cloud": 1012
+    },
+    "odometry_count": 1012,
+    "odometry_duration_s": 101.09995985031128,
+    "all_finite": true,
+    "timestamp_dt_min_max_s": [
+      0.09747481346130371,
+      0.10257148742675781
+    ],
+    "quaternion_norm_min_max": [
+      0.9999999999999787,
+      1.0000000000000002
+    ],
+    "path_length_m": 3.232006323639906,
+    "max_position_step_m": 0.011921640495895156,
+    "start_position_m": [
+      0.00015563972624948376,
+      -0.003807049595011281,
+      -0.006714965453585488
+    ],
+    "end_position_m": [
+      0.06971049081652693,
+      -0.04183643111226634,
+      -0.0016953049146160605
+    ],
+    "position_min_m": [
+      -0.47862730075013893,
+      -0.5725196864906006,
+      -0.006714965453585488
+    ],
+    "position_max_m": [
+      0.07593449424396301,
+      -0.003807049595011281,
+      0.010055501757855308
+    ],
+    "passed": true
+  },
+  "native_parser_tests_passed": 7,
+  "existing_script_tests_passed": 38,
+  "limitations": [
+    "Nominal front extrinsics; not per-robot calibrated",
+    "No ground-truth accuracy assessment",
+    "Monitor counters are not proof of lossless delivery to FAST-LIO",
+    "Rear cloud transform unresolved",
+    "No live motion or chassis integration validation"
+  ]
+}

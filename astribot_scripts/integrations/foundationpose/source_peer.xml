@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>camera_udp</transport_id><type>UDPv4</type>
+      <maxMessageSize>1400</maxMessageSize>
+      <sendBufferSize>8388608</sendBufferSize>
+      <receiveBufferSize>8388608</receiveBufferSize>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="astribot_camera_source" is_default_profile="true">
+    <rtps>
+      <useBuiltinTransports>false</useBuiltinTransports>
+      <userTransports><transport_id>camera_udp</transport_id></userTransports>
+      <builtin><initialPeersList>
+        <locator><udpv4><address>192.168.200.102</address></udpv4></locator>
+        <locator><udpv4><address>239.255.0.1</address></udpv4></locator>
+        <locator><udpv4><address>127.0.0.1</address></udpv4></locator>
+      </initialPeersList></builtin>
+    </rtps>
+  </participant>
+</profiles>

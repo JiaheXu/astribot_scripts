@@ -1,0 +1,474 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e091f3a..2b51408 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -125,4 +125,12 @@ install(
+   DESTINATION share/${PROJECT_NAME}
+ )
+ 
++if(BUILD_TESTING)
++  find_package(ament_cmake_gtest REQUIRED)
++  ament_add_gtest(test_astribot_pointcloud test/test_astribot_pointcloud.cpp)
++  target_include_directories(test_astribot_pointcloud PRIVATE src ${PCL_INCLUDE_DIRS})
++  ament_target_dependencies(test_astribot_pointcloud sensor_msgs)
++  target_link_libraries(test_astribot_pointcloud Eigen3::Eigen)
++endif()
++
+ ament_package()
+diff --git a/package.xml b/package.xml
+index 8c39e18..9d614fe 100644
+--- a/package.xml
++++ b/package.xml
+@@ -30,6 +30,7 @@
+   <depend>livox_ros_driver2</depend>
+ 
+   <exec_depend>rosidl_default_runtime</exec_depend>
++  <test_depend>ament_cmake_gtest</test_depend>
+   <member_of_group>rosidl_interface_packages</member_of_group>
+ 
+   <export>
+diff --git a/src/laserMapping.cpp b/src/laserMapping.cpp
+index d441261..7f8ccc9 100644
+--- a/src/laserMapping.cpp
++++ b/src/laserMapping.cpp
+@@ -61,6 +61,7 @@
+ #include <geometry_msgs/msg/vector3.hpp>
+ #include <livox_ros_driver2/msg/custom_msg.hpp>
+ #include "preprocess.h"
++#include "astribot_pointcloud.hpp"
+ #include <ikd-Tree/ikd_Tree.h>
+ 
+ #define INIT_TIME           (0.1)
+@@ -282,27 +283,41 @@ void lasermap_fov_segment()
+ 
+ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg) 
+ {
+-    mtx_buffer.lock();
+-    scan_count ++;
++    std::unique_lock<std::mutex> lock(mtx_buffer);
+     double cur_time = get_time_sec(msg->header.stamp);
+     double preprocess_start_time = omp_get_wtime();
++    PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
++    try
++    {
++        p_pre->process(msg, ptr);
++        if (ptr->size() < 2)
++            throw std::invalid_argument("fewer than two valid lidar points");
++    }
++    catch (const std::exception &error)
++    {
++        static rclcpp::Clock log_clock(RCL_STEADY_TIME);
++        RCLCPP_WARN_THROTTLE(rclcpp::get_logger("laser_mapping"), log_clock, 5000,
++                            "Dropping PointCloud2: %s", error.what());
++        return;
++    }
++    scan_count ++;
+     if (!is_first_lidar && cur_time < last_timestamp_lidar)
+     {
+         std::cerr << "lidar loop back, clear buffer" << std::endl;
+         lidar_buffer.clear();
++        time_buffer.clear();
++        lidar_pushed = false;
+     }
+     if (is_first_lidar)
+     {
+         is_first_lidar = false;
+     }
+ 
+-    PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
+-    p_pre->process(msg, ptr);
+     lidar_buffer.push_back(ptr);
+     time_buffer.push_back(cur_time);
+     last_timestamp_lidar = cur_time;
+-    s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;
+-    mtx_buffer.unlock();
++    if (scan_count < MAXN) s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;
++    lock.unlock();
+     sig_buffer.notify_all();
+ }
+ 
+@@ -825,6 +840,10 @@ public:
+         this->declare_parameter<int>("preprocess.scan_line", 16);
+         this->declare_parameter<int>("preprocess.timestamp_unit", US);
+         this->declare_parameter<int>("preprocess.scan_rate", 10);
++        this->declare_parameter<vector<double>>("preprocess.cloud_to_lidar_R",
++            vector<double>{1., 0., 0., 0., 1., 0., 0., 0., 1.});
++        this->declare_parameter<vector<double>>("preprocess.cloud_to_lidar_T",
++            vector<double>{0., 0., 0.});
+         this->declare_parameter<int>("point_filter_num", 2);
+         this->declare_parameter<bool>("feature_extract_enable", false);
+         this->declare_parameter<bool>("runtime_pos_log_enable", false);
+@@ -870,6 +889,14 @@ public:
+         this->get_parameter_or<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());
+         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
+ 
++        const auto cloud_R = this->get_parameter("preprocess.cloud_to_lidar_R").as_double_array();
++        const auto cloud_T = this->get_parameter("preprocess.cloud_to_lidar_T").as_double_array();
++        if (cloud_R.size() != 9 || cloud_T.size() != 3)
++            throw std::invalid_argument("cloud_to_lidar_R/T must have 9/3 entries");
++        p_pre->cloud_to_lidar_R << MAT_FROM_ARRAY(cloud_R);
++        p_pre->cloud_to_lidar_T << VEC_FROM_ARRAY(cloud_T);
++        astribot::validate_transform(p_pre->cloud_to_lidar_R, p_pre->cloud_to_lidar_T);
++
+         RCLCPP_INFO(this->get_logger(), "p_pre->lidar_type %d", p_pre->lidar_type);
+ 
+         path.header.stamp = this->get_clock()->now();
+@@ -926,7 +953,7 @@ public:
+         {
+             sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
+         }
+-        sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
++        sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_last(200), imu_cbk);
+         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
+         pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
+         pubLaserCloudEffect_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
+diff --git a/src/preprocess.cpp b/src/preprocess.cpp
+index 88444f4..fd5d182 100644
+--- a/src/preprocess.cpp
++++ b/src/preprocess.cpp
+@@ -1,4 +1,5 @@
+ #include "preprocess.h"
++#include "astribot_pointcloud.hpp"
+ 
+ #include <pcl/common/common.h>
+ 
+@@ -73,6 +74,17 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
+ 
+   switch (lidar_type)
+   {
++    case ASTRIBOT:
++      if (feature_enabled || time_unit != NS)
++        throw std::invalid_argument("Astribot mode requires feature_extract_enable=false and timestamp_unit=3");
++      pl_surf.clear();
++      pl_corn.clear();
++      pl_full.clear();
++      pl_surf = astribot::preprocess(*msg, blind, N_SCANS, point_filter_num, SCAN_RATE,
++                                    cloud_to_lidar_R, cloud_to_lidar_T);
++      given_offset_time = true;
++      break;
++
+     case OUST64:
+       oust64_handler(msg);
+       break;
+diff --git a/src/preprocess.h b/src/preprocess.h
+index 7f7d7a1..3f7bc1a 100644
+--- a/src/preprocess.h
++++ b/src/preprocess.h
+@@ -16,7 +16,8 @@ enum LID_TYPE
+   AVIA = 1,
+   VELO16,
+   OUST64,
+-  MID360
++  MID360,
++  ASTRIBOT = 5  // PointCloud2 with absolute FLOAT64 timestamp in nanoseconds
+ };  //{1, 2, 3}
+ enum TIME_UNIT
+ {
+@@ -170,6 +171,8 @@ class Preprocess
+   int lidar_type, point_filter_num, N_SCANS, SCAN_RATE, time_unit;
+   double blind;
+   bool feature_enabled, given_offset_time;
++  Eigen::Matrix3d cloud_to_lidar_R = Eigen::Matrix3d::Identity();
++  Eigen::Vector3d cloud_to_lidar_T = Eigen::Vector3d::Zero();
+   // ros::Publisher pub_full, pub_surf, pub_corn;
+ 
+ private:
+diff --git a/src/astribot_pointcloud.hpp b/src/astribot_pointcloud.hpp
+new file mode 100644
+index 0000000..2a20df6
+--- /dev/null
++++ b/src/astribot_pointcloud.hpp
+@@ -0,0 +1,128 @@
++// Astribot PointCloud2 input: absolute FLOAT64 nanoseconds, not azimuth timing.
++#pragma once
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <cstring>
++#include <limits>
++#include <stdexcept>
++#include <string>
++#include <Eigen/Geometry>
++#include <pcl/point_cloud.h>
++#include <pcl/point_types.h>
++#include <sensor_msgs/msg/point_cloud2.hpp>
++
++namespace astribot
++{
++using Cloud = pcl::PointCloud<pcl::PointXYZINormal>;
++
++template <typename T>
++T read_scalar(const uint8_t *data, bool bigendian)
++{
++  std::array<uint8_t, sizeof(T)> bytes;
++  std::memcpy(bytes.data(), data, sizeof(T));
++  const uint16_t one = 1;
++  const bool host_bigendian = *reinterpret_cast<const uint8_t *>(&one) == 0;
++  if (host_bigendian != bigendian) std::reverse(bytes.begin(), bytes.end());
++  T value;
++  std::memcpy(&value, bytes.data(), sizeof(T));
++  return value;
++}
++
++inline uint32_t field_offset(const sensor_msgs::msg::PointCloud2 &msg,
++                             const std::string &name, uint8_t datatype, uint32_t size)
++{
++  const sensor_msgs::msg::PointField *found = nullptr;
++  for (const auto &field : msg.fields)
++  {
++    if (field.name != name) continue;
++    if (found) throw std::invalid_argument("duplicate field: " + name);
++    found = &field;
++  }
++  if (!found || found->datatype != datatype || found->count != 1 ||
++      size > msg.point_step || found->offset > msg.point_step - size)
++    throw std::invalid_argument("missing or invalid field: " + name);
++  return found->offset;
++}
++
++inline void validate_transform(const Eigen::Matrix3d &rotation, const Eigen::Vector3d &translation)
++{
++  if (!rotation.allFinite() || !translation.allFinite() ||
++      (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() > 1e-6 ||
++      std::abs(rotation.determinant() - 1.0) > 1e-6)
++    throw std::invalid_argument("cloud_to_lidar must be a finite proper rigid transform");
++}
++
++inline Cloud preprocess(const sensor_msgs::msg::PointCloud2 &msg,
++                        double blind, int scan_lines, int stride, int scan_rate,
++                        const Eigen::Matrix3d &cloud_to_lidar_R = Eigen::Matrix3d::Identity(),
++                        const Eigen::Vector3d &cloud_to_lidar_T = Eigen::Vector3d::Zero())
++{
++  using Field = sensor_msgs::msg::PointField;
++  validate_transform(cloud_to_lidar_R, cloud_to_lidar_T);
++  if (!std::isfinite(blind) || blind < 0 || scan_lines < 1 || scan_lines > 256 ||
++      stride < 1 || scan_rate < 1)
++    throw std::invalid_argument("invalid Astribot preprocessing settings");
++  if (msg.header.stamp.sec < 0 || msg.header.stamp.nanosec >= 1000000000u)
++    throw std::invalid_argument("invalid cloud header timestamp");
++  const uint32_t x = field_offset(msg, "x", Field::FLOAT32, 4);
++  const uint32_t y = field_offset(msg, "y", Field::FLOAT32, 4);
++  const uint32_t z = field_offset(msg, "z", Field::FLOAT32, 4);
++  const uint32_t intensity = field_offset(msg, "intensity", Field::FLOAT32, 4);
++  const uint32_t tag = field_offset(msg, "tag", Field::UINT8, 1);
++  const uint32_t line = field_offset(msg, "line", Field::UINT8, 1);
++  const uint32_t timestamp = field_offset(msg, "timestamp", Field::FLOAT64, 8);
++  if (uint64_t(msg.width) * msg.point_step > msg.row_step ||
++      uint64_t(msg.height) * msg.row_step > msg.data.size())
++    throw std::invalid_argument("truncated PointCloud2 data or invalid row_step");
++
++  Cloud cloud;
++  cloud.reserve(uint64_t(msg.width) * msg.height / stride + 1);
++  const long double start_ns = static_cast<long double>(msg.header.stamp.sec) * 1e9L +
++                               msg.header.stamp.nanosec;
++  const double max_offset_ms = 2000.0 / scan_rate;
++  size_t valid = 0;
++  for (uint32_t row = 0; row < msg.height; ++row)
++  {
++    for (uint32_t col = 0; col < msg.width; ++col)
++    {
++      const auto *data = msg.data.data() + size_t(row) * msg.row_step + size_t(col) * msg.point_step;
++      const double stamp = read_scalar<double>(data + timestamp, msg.is_bigendian);
++      // Subtract the epoch BEFORE conversion to float/milliseconds. At this
++      // epoch FLOAT64 nanoseconds have ~256 ns quantization; tolerate 1 us.
++      const double offset_ms = static_cast<double>((static_cast<long double>(stamp) - start_ns) * 1e-6L);
++      if (!std::isfinite(stamp) || offset_ms < -0.001 || offset_ms > max_offset_ms)
++        throw std::invalid_argument("timestamp must be absolute nanoseconds near the cloud header");
++      if (data[line] >= scan_lines || ((data[tag] & 0x30) != 0 && (data[tag] & 0x30) != 0x10))
++        continue;
++      pcl::PointXYZINormal point{};
++      point.x = read_scalar<float>(data + x, msg.is_bigendian);
++      point.y = read_scalar<float>(data + y, msg.is_bigendian);
++      point.z = read_scalar<float>(data + z, msg.is_bigendian);
++      point.intensity = read_scalar<float>(data + intensity, msg.is_bigendian);
++      if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) ||
++          !std::isfinite(point.intensity))
++        continue;
++      // Undo the driver's rigid point transform before blind filtering and
++      // deskew. Transformed zero returns otherwise appear as a phantom object.
++      const Eigen::Vector3d native = cloud_to_lidar_R *
++          Eigen::Vector3d(point.x, point.y, point.z) + cloud_to_lidar_T;
++      if (!native.allFinite() || native.squaredNorm() <= blind * blind)
++        continue;
++      if (valid++ % stride != 0) continue;
++      point.x = native.x(); point.y = native.y(); point.z = native.z();
++      point.normal_x = point.normal_y = point.normal_z = 0;
++      point.curvature = static_cast<float>(std::max(0.0, offset_ms));
++      cloud.push_back(point);
++    }
++  }
++  // sync_packages uses the last point to determine the end of the scan.
++  std::sort(cloud.begin(), cloud.end(), [](const auto &a, const auto &b) {
++    return a.curvature < b.curvature;
++  });
++  cloud.is_dense = true;
++  return cloud;
++}
++}  // namespace astribot
+diff --git a/test/test_astribot_pointcloud.cpp b/test/test_astribot_pointcloud.cpp
+new file mode 100644
+index 0000000..e7f8af0
+--- /dev/null
++++ b/test/test_astribot_pointcloud.cpp
+@@ -0,0 +1,159 @@
++#include <gtest/gtest.h>
++#include "astribot_pointcloud.hpp"
++
++using sensor_msgs::msg::PointCloud2;
++using sensor_msgs::msg::PointField;
++
++TEST(AstribotCloud, RejectsReflectedScaledAndNonfiniteTransforms)
++{
++  auto rotation = Eigen::Matrix3d::Identity().eval();
++  rotation(0, 0) = -1;
++  EXPECT_THROW(astribot::validate_transform(rotation, Eigen::Vector3d::Zero()), std::invalid_argument);
++  rotation(0, 0) = 2;
++  EXPECT_THROW(astribot::validate_transform(rotation, Eigen::Vector3d::Zero()), std::invalid_argument);
++  EXPECT_THROW(astribot::validate_transform(Eigen::Matrix3d::Identity(),
++      Eigen::Vector3d(std::numeric_limits<double>::quiet_NaN(), 0, 0)), std::invalid_argument);
++}
++
++template <typename T>
++void put(PointCloud2 &msg, size_t offset, T value)
++{
++  std::array<uint8_t, sizeof(T)> bytes;
++  std::memcpy(bytes.data(), &value, sizeof(T));
++  const uint16_t one = 1;
++  if (msg.is_bigendian != (*reinterpret_cast<const uint8_t *>(&one) == 0))
++    std::reverse(bytes.begin(), bytes.end());
++  std::copy(bytes.begin(), bytes.end(), msg.data.begin() + offset);
++}
++
++PointCloud2 sample(bool bigendian = false, bool padded_rows = false)
++{
++  PointCloud2 msg;
++  msg.header.stamp.sec = 1794903864;
++  msg.header.stamp.nanosec = 400424000;
++  msg.width = padded_rows ? 1 : 2;
++  msg.height = padded_rows ? 2 : 1;
++  msg.point_step = 26;
++  msg.row_step = msg.width * msg.point_step + (padded_rows ? 7 : 0);
++  msg.is_bigendian = bigendian;
++  for (auto field : std::vector<std::tuple<std::string, uint32_t, uint8_t>>{
++         {"x", 0, PointField::FLOAT32}, {"y", 4, PointField::FLOAT32},
++         {"z", 8, PointField::FLOAT32}, {"intensity", 12, PointField::FLOAT32},
++         {"tag", 16, PointField::UINT8}, {"line", 17, PointField::UINT8},
++         {"timestamp", 18, PointField::FLOAT64}})
++  {
++    PointField f;
++    f.name = std::get<0>(field); f.offset = std::get<1>(field);
++    f.datatype = std::get<2>(field); f.count = 1;
++    msg.fields.push_back(f);
++  }
++  msg.data.resize(msg.row_step * msg.height);
++  for (size_t i = 0; i < 2; ++i)
++  {
++    const size_t base = i * (padded_rows ? msg.row_step : msg.point_step);
++    put<float>(msg, base, 1.f + i);
++    put<float>(msg, base + 4, 0.5f);
++    put<float>(msg, base + 8, 0.1f);
++    put<float>(msg, base + 12, 42.f);
++    msg.data[base + 17] = i;
++    put<double>(msg, base + 18, 1794903864400424000.0 + i * 99830000.0);
++  }
++  return msg;
++}
++
++TEST(AstribotCloud, PreservesAbsoluteNanosecondTimingAndCoordinates)
++{
++  auto cloud = astribot::preprocess(sample(), 0.5, 4, 1, 10);
++  ASSERT_EQ(cloud.size(), 2u);
++  EXPECT_NEAR(cloud[0].curvature, 0.0, 0.001);
++  EXPECT_NEAR(cloud[1].curvature, 99.83, 0.001);
++  EXPECT_FLOAT_EQ(cloud[0].x, 1.f);
++  EXPECT_FLOAT_EQ(cloud[0].intensity, 42.f);
++}
++
++TEST(AstribotCloud, SupportsBigEndianAndOrganizedRowPadding)
++{
++  auto cloud = astribot::preprocess(sample(true, true), 0.5, 4, 1, 10);
++  ASSERT_EQ(cloud.size(), 2u);
++  EXPECT_FLOAT_EQ(cloud[1].x, 2.f);
++  EXPECT_NEAR(cloud[1].curvature, 99.83, 0.001);
++}
++
++TEST(AstribotCloud, SortsByMeasuredTimeAndHonorsStride)
++{
++  auto msg = sample();
++  std::swap_ranges(msg.data.begin(), msg.data.begin() + 26, msg.data.begin() + 26);
++  auto cloud = astribot::preprocess(msg, 0.5, 4, 1, 10);
++  EXPECT_FLOAT_EQ(cloud[0].x, 1.f);
++  EXPECT_LT(cloud[0].curvature, cloud[1].curvature);
++  EXPECT_EQ(astribot::preprocess(msg, 0.5, 4, 2, 10).size(), 1u);
++}
++
++TEST(AstribotCloud, RejectsMissingWrongOrOutOfBoundsFields)
++{
++  auto msg = sample();
++  msg.fields.back().name = "time";
++  EXPECT_THROW(astribot::preprocess(msg, 0.5, 4, 1, 10), std::invalid_argument);
++  msg = sample(); msg.fields.back().datatype = PointField::FLOAT32;
++  EXPECT_THROW(astribot::preprocess(msg, 0.5, 4, 1, 10), std::invalid_argument);
++  msg = sample(); msg.fields.back().offset = 22;
++  EXPECT_THROW(astribot::preprocess(msg, 0.5, 4, 1, 10), std::invalid_argument);
++  msg = sample(); msg.fields.push_back(msg.fields.back());
++  EXPECT_THROW(astribot::preprocess(msg, 0.5, 4, 1, 10), std::invalid_argument);
++}
++
++TEST(AstribotCloud, RejectsTruncatedDataAndBadDimensions)
++{
++  auto msg = sample(); msg.data.pop_back();
++  EXPECT_THROW(astribot::preprocess(msg, 0.5, 4, 1, 10), std::invalid_argument);
++  msg = sample(); msg.row_step = 25;
++  EXPECT_THROW(astribot::preprocess(msg, 0.5, 4, 1, 10), std::invalid_argument);
++  EXPECT_THROW(astribot::preprocess(sample(), 0.5, 4, 0, 10), std::invalid_argument);
++}
++
++TEST(AstribotCloud, RejectsRelativeSecondsWrongEpochAndNonfiniteTimestamps)
++{
++  for (double time : {0.05, 1794903864.4, 1794903865400424000.0,
++                      std::numeric_limits<double>::quiet_NaN()})
++  {
++    auto msg = sample(); put<double>(msg, 18, time);
++    EXPECT_THROW(astribot::preprocess(msg, 0.5, 4, 1, 10), std::invalid_argument);
++  }
++}
++
++TEST(AstribotCloud, FiltersTagsLinesBlindPointsAndNonfiniteGeometry)
++{
++  auto msg = sample(); msg.data[16] = 0x20;
++  EXPECT_EQ(astribot::preprocess(msg, 0.5, 4, 1, 10).size(), 1u);
++  msg = sample(); msg.data[17] = 4;
++  EXPECT_EQ(astribot::preprocess(msg, 0.5, 4, 1, 10).size(), 1u);
++  msg = sample(); put<float>(msg, 0, std::numeric_limits<float>::quiet_NaN());
++  EXPECT_EQ(astribot::preprocess(msg, 0.5, 4, 1, 10).size(), 1u);
++  EXPECT_TRUE(astribot::preprocess(sample(), 10, 4, 1, 10).empty());
++}
++
++TEST(AstribotCloud, UndoesDriverTransformBeforeBlindFilteringAndPreservesTime)
++{
++  auto msg = sample();
++  const Eigen::Matrix3d rotation = (Eigen::AngleAxisd(0.4, Eigen::Vector3d::UnitZ()) *
++      Eigen::AngleAxisd(0.15, Eigen::Vector3d::UnitY()) *
++      Eigen::AngleAxisd(-0.2, Eigen::Vector3d::UnitX())).toRotationMatrix();
++  const Eigen::Vector3d translation(0.001, -0.496, 0.084);
++  // One missing return transformed away from zero, plus one real point.
++  const Eigen::Vector3d native(1., 0.5, 0.1);
++  for (size_t i = 0; i < 2; ++i)
++  {
++    const Eigen::Vector3d published = i == 0 ? translation : (rotation * native + translation).eval();
++    for (size_t axis = 0; axis < 3; ++axis)
++      put<float>(msg, i * 26 + axis * 4, published[axis]);
++  }
++  ASSERT_GT(translation.norm(), 0.5);
++  auto cloud = astribot::preprocess(msg, 0.5, 4, 1, 10,
++                                    rotation.transpose(), -rotation.transpose() * translation);
++  ASSERT_EQ(cloud.size(), 1u);
++  EXPECT_NEAR(cloud[0].x, native.x(), 1e-6);
++  EXPECT_NEAR(cloud[0].y, native.y(), 1e-6);
++  EXPECT_NEAR(cloud[0].z, native.z(), 1e-6);
++  EXPECT_NEAR(cloud[0].curvature, 99.83, 0.001);
++  EXPECT_FLOAT_EQ(cloud[0].intensity, 42.f);
++}

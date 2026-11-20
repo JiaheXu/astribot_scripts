@@ -1,0 +1,167 @@
+# Overrides merged with the INSTALLED nav2_bringup Humble defaults by our launch.
+# Mapless local navigation: both rolling costmaps use the continuous LIO frame.
+# Unobserved space is free; use short local goals, not building-scale routing.
+bt_navigator:
+  ros__parameters:
+    global_frame: astribot_nav_odom
+    robot_base_frame: astribot_nav_base_link
+    odom_topic: /astribot_nav/odom
+    transform_tolerance: 0.3
+
+controller_server:
+  ros__parameters:
+    odom_topic: /astribot_nav/odom
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    progress_checker:
+      required_movement_radius: 0.08
+      movement_time_allowance: 10.0
+    general_goal_checker:
+      xy_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.15
+    FollowPath:
+      plugin: dwb_core::DWBLocalPlanner
+      debug_trajectory_details: false
+      min_vel_x: -0.10
+      max_vel_x: 0.20
+      min_vel_y: -0.15
+      max_vel_y: 0.15
+      max_vel_theta: 0.40
+      min_speed_xy: 0.0
+      max_speed_xy: 0.20
+      min_speed_theta: 0.0
+      acc_lim_x: 0.30
+      acc_lim_y: 0.30
+      acc_lim_theta: 0.60
+      decel_lim_x: -0.30
+      decel_lim_y: -0.30
+      decel_lim_theta: -0.60
+      vx_samples: 15
+      vy_samples: 11
+      vtheta_samples: 15
+      sim_time: 1.5
+      transform_tolerance: 0.3
+      xy_goal_tolerance: 0.15
+      trans_stopped_velocity: 0.03
+      critics: [RotateToGoal, Oscillation, ObstacleFootprint, GoalAlign, PathAlign, PathDist, GoalDist]
+      ObstacleFootprint.scale: 1.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      global_frame: astribot_nav_odom
+      robot_base_frame: astribot_nav_base_link
+      transform_tolerance: 0.3
+      rolling_window: true
+      track_unknown_space: false
+      width: 6
+      height: 6
+      resolution: 0.05
+      update_frequency: 10.0
+      publish_frequency: 2.0
+      # Nominal 0.30 m base radius plus margin; NOT an extended-arm footprint.
+      robot_radius: 0.45
+      footprint_padding: 0.02
+      plugins: [obstacle_layer, inflation_layer]
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        footprint_clearing_enabled: true
+        max_obstacle_height: 1.8
+        observation_sources: rear_points
+        rear_points:
+          topic: /astribot_nav/points
+          sensor_frame: astribot_nav_rear_lidar
+          data_type: PointCloud2
+          marking: true
+          clearing: true
+          min_obstacle_height: 0.08
+          max_obstacle_height: 1.8
+          obstacle_min_range: 0.35
+          obstacle_max_range: 5.0
+          raytrace_min_range: 0.0
+          raytrace_max_range: 6.0
+          observation_persistence: 0.0
+          expected_update_rate: 0.5
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+        inflation_radius: 0.70
+        cost_scaling_factor: 3.0
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      global_frame: astribot_nav_odom
+      robot_base_frame: astribot_nav_base_link
+      transform_tolerance: 0.3
+      rolling_window: true
+      track_unknown_space: false
+      width: 20
+      height: 20
+      resolution: 0.05
+      update_frequency: 2.0
+      publish_frequency: 1.0
+      robot_radius: 0.45
+      footprint_padding: 0.02
+      plugins: [obstacle_layer, inflation_layer]
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        footprint_clearing_enabled: true
+        max_obstacle_height: 1.8
+        observation_sources: rear_points
+        rear_points:
+          topic: /astribot_nav/points
+          sensor_frame: astribot_nav_rear_lidar
+          data_type: PointCloud2
+          marking: true
+          clearing: true
+          min_obstacle_height: 0.08
+          max_obstacle_height: 1.8
+          obstacle_min_range: 0.35
+          obstacle_max_range: 8.0
+          raytrace_min_range: 0.0
+          raytrace_max_range: 10.0
+          observation_persistence: 0.0
+          expected_update_rate: 0.5
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+        inflation_radius: 0.70
+        cost_scaling_factor: 3.0
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 2.0
+    GridBased:
+      plugin: nav2_navfn_planner/NavfnPlanner
+      tolerance: 0.2
+      use_astar: true
+      allow_unknown: false
+
+behavior_server:
+  ros__parameters:
+    global_frame: astribot_nav_odom
+    robot_base_frame: astribot_nav_base_link
+    transform_tolerance: 0.3
+    max_rotational_vel: 0.4
+    min_rotational_vel: 0.1
+    rotational_acc_lim: 0.6
+
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    feedback: OPEN_LOOP
+    scale_velocities: true
+    max_velocity: [0.20, 0.15, 0.40]
+    min_velocity: [-0.10, -0.15, -0.40]
+    max_accel: [0.30, 0.30, 0.60]
+    max_decel: [-0.30, -0.30, -0.60]
+    odom_topic: /astribot_nav/odom
+    velocity_timeout: 0.3
+
+waypoint_follower:
+  ros__parameters:
+    wait_at_waypoint:
+      enabled: false

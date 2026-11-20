@@ -1,0 +1,794 @@
+#!/usr/bin/env python3
+"""Stream Astribot sensors and optionally record RGB video and LiDAR clouds.
+
+The robot-side Astribot processes must already be running.  This script
+connects directly to ROS 2, activates cameras,
+decodes their compressed RGB streams, publishes RGB and depth sensor_msgs/Image
+topics, and creates an RGB-colored sensor_msgs/PointCloud2 topic for RViz2.
+
+Run after sourcing ROS 2 and this SDK's environment:
+
+    python3 examples/303-stream_rgb_raw.py
+    python3 examples/303-stream_rgb_raw.py --save
+    python3 examples/303-stream_rgb_raw.py --save --camera-clouds
+
+The ROS domain defaults to ROS_DOMAIN_ID, or 25 when it is unset. Use
+--domain-id to override it. Source env.sh in the viewing terminal too (for its Fast DDS network profile),
+and export ROS_DOMAIN_ID=25.
+All generated topics are under /sdk/; camera clouds additionally need
+--camera-clouds and a best-effort subscriber.
+
+With --save, recordings are written to recordings/YY-MM-DD-HH-MM-SS/.
+Press q to finish recording while streaming continues; press Ctrl-C to quit.
+Only RGB images and the two LiDAR point clouds are recorded. Depth images are
+published but not saved. Camera clouds require --camera-clouds and a subscriber.
+LiDAR format version 2 stores payloads in chunks; each JSONL index entry gives
+the chunk filename, byte offset, length, header, and PointCloud2 schema.
+
+Published topics:
+    /sdk/astribot_camera/head_rgbd/color_image
+    /sdk/astribot_camera/head_rgbd/depth_image
+    /sdk/astribot_camera/head_rgbd/rgb_pointcloud
+    /sdk/astribot_camera/torso_rgbd/color_image
+    /sdk/astribot_camera/torso_rgbd/depth_image
+    /sdk/astribot_camera/torso_rgbd/rgb_pointcloud
+    /sdk/astribot_camera/head_stereo/left_image
+    /sdk/astribot_camera/head_stereo/right_image
+    /sdk/astribot_camera/left_wrist_rgbd/color_image
+    /sdk/astribot_camera/right_wrist_rgbd/color_image
+    /sdk/astribot_lidar/front_scan
+    /sdk/astribot_lidar/back_scan
+
+The robot processes are assumed to be running already. The script warns when
+an expected sensor stream has been silent for more than five seconds.
+"""
+
+import argparse
+import csv
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import queue
+import select
+import signal
+import sys
+import termios
+import threading
+import time
+import tty
+
+import cv2
+import numpy as np
+import rclpy
+from rclpy.executors import SingleThreadedExecutor
+from sensor_msgs.msg import CompressedImage, Image, PointCloud2, PointField
+from rclpy.qos import qos_profile_sensor_data
+from std_srvs.srv import SetBool
+
+
+CAMERAS = {
+    "head_rgbd": {
+        "color": "/sdk/astribot_camera/head_rgbd/color_image",
+        "depth": "/sdk/astribot_camera/head_rgbd/depth_image",
+        "cloud": "/sdk/astribot_camera/head_rgbd/rgb_pointcloud",
+    },
+    "torso_rgbd": {
+        "color": "/sdk/astribot_camera/torso_rgbd/color_image",
+        "depth": "/sdk/astribot_camera/torso_rgbd/depth_image",
+        "cloud": "/sdk/astribot_camera/torso_rgbd/rgb_pointcloud",
+    },
+    # This driver packs the left/right views into one side-by-side JPEG.
+    "head_stereo": {
+        "source": "/astribot_camera/head_stereo/color_compress/compressed",
+        "stereo": {
+            "left": "/sdk/astribot_camera/head_stereo/left_image",
+            "right": "/sdk/astribot_camera/head_stereo/right_image",
+        },
+    },
+    "left_wrist_rgbd": {
+        "color": "/sdk/astribot_camera/left_wrist_rgbd/color_image",
+        "depth": "/sdk/astribot_camera/left_wrist_rgbd/depth_image",
+        "cloud": "/sdk/astribot_camera/left_wrist_rgbd/rgb_pointcloud",
+    },
+    "right_wrist_rgbd": {
+        "color": "/sdk/astribot_camera/right_wrist_rgbd/color_image",
+        "depth": "/sdk/astribot_camera/right_wrist_rgbd/depth_image",
+        "cloud": "/sdk/astribot_camera/right_wrist_rgbd/rgb_pointcloud",
+    },
+}
+
+OUTPUT_WIDTH = 320
+OUTPUT_HEIGHT = 240
+
+# Replace these with calibrated intrinsics at INTRINSICS_WIDTH x INTRINSICS_HEIGHT.
+INTRINSICS = {
+    "head_rgbd": (525.0, 525.0, 319.5, 239.5),
+    "torso_rgbd": (525.0, 525.0, 319.5, 239.5),
+    "left_wrist_rgbd": (525.0, 525.0, 319.5, 239.5),
+    "right_wrist_rgbd": (525.0, 525.0, 319.5, 239.5),
+}
+DEPTH_SCALE_M = 0.001  # uint16 depth values are millimetres
+DATA_TIMEOUT_SEC = 5.0
+LIDAR_TOPICS = {
+    "front": ("/livox/lidar_front", "/sdk/astribot_lidar/front_scan"),
+    "back": ("/livox/lidar_back", "/sdk/astribot_lidar/back_scan"),
+}
+
+VIDEO_FPS = 30.0  # MP4 playback rate; timestamps.csv contains the actual frame times.
+RECORD_QUEUE_SIZE = 32
+INDEX_FLUSH_SEC = 1.0
+LIDAR_CHUNK_BYTES = 64 * 1024 * 1024
+INTRINSICS_WIDTH, INTRINSICS_HEIGHT = 640, 480
+CLOUD_SYNC_NS = 50_000_000
+RECORDINGS_DIR = Path(__file__).resolve().parent.parent / "recordings"
+
+
+def stamp_ns(header):
+    return int(header.stamp.sec) * 1_000_000_000 + int(header.stamp.nanosec)
+
+
+class SensorRecorder:
+    """Write received frames on a worker thread so ROS callbacks stay responsive."""
+
+    def __init__(self):
+        started = datetime.now().astimezone()
+        self.folder = RECORDINGS_DIR / started.strftime("%y-%m-%d-%H-%M-%S")
+        self.folder.mkdir(parents=True, exist_ok=False)
+        self.queues = {kind: queue.Queue(maxsize=RECORD_QUEUE_SIZE) for kind in ("rgb", "lidar")}
+        self.queue_high_water = {kind: 0 for kind in self.queues}
+        self.lidar_files = {}
+        self.last_drop_warning = 0.0
+        self.state_lock = threading.Lock()
+        self.active = True
+        self.dropped = {}
+        self.errors = []
+        self.videos = {}
+        self.index_files = {}
+        self.counts = {}
+        self.manifest = {
+            "format_version": 2,
+            "lidar_storage": "chunked binary; index file/offset/length identify each payload",
+            "started_at": started.isoformat(),
+            "status": "recording",
+            "timestamp_units": "Unix nanoseconds; stamp_ns comes from the ROS header",
+            "video": {"codec": "mp4v", "fps": VIDEO_FPS, "width": OUTPUT_WIDTH,
+                      "height": OUTPUT_HEIGHT, "timestamps_authoritative": True},
+            "rgb_streams": {},
+            "lidar_streams": {},
+        }
+        for camera, spec in CAMERAS.items():
+            streams = spec.get("stereo", {"color": spec.get("color")})
+            for stream, topic in streams.items():
+                key = f"{camera}_{stream}"
+                self.manifest["rgb_streams"][key] = {
+                    "source_topic": spec.get(
+                        "source", f"/astribot_camera/{camera}/{stream}_compress/compressed"
+                    ),
+                    **({"source_view": stream} if "stereo" in spec else {}),
+                    "topic": topic,
+                    "video": f"rgb/{key}.mp4",
+                    "index": f"rgb/{key}_timestamps.csv",
+                    "encoding": "bgr8",
+                }
+                self.counts[key] = 0
+        for name, (input_topic, output_topic) in LIDAR_TOPICS.items():
+            self.manifest["lidar_streams"][name] = {
+                "source_topic": input_topic,
+                "topic": output_topic,
+                "data_dir": f"lidar/{name}",
+                "index": f"lidar/{name}_index.jsonl",
+                "type": "sensor_msgs/msg/PointCloud2",
+            }
+            self.counts[name] = 0
+        self._write_manifest()
+        self.workers = [
+            threading.Thread(target=self._run_writer, args=(kind,), daemon=True, name=f"record-{kind}")
+            for kind in self.queues
+        ]
+        for worker in self.workers:
+            worker.start()
+
+    def _write_manifest(self):
+        target = self.folder / "manifest.json"
+        temporary = self.folder / "manifest.json.tmp"
+        temporary.write_text(json.dumps(self.manifest, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(target)
+
+    def _enqueue(self, kind, key, header, payload):
+        with self.state_lock:
+            if not self.active:
+                return
+            item = (kind, key, stamp_ns(header), header.frame_id, time.time_ns(), payload)
+            try:
+                self.queues[kind].put_nowait(item)
+                self.queue_high_water[kind] = max(self.queue_high_water[kind], self.queues[kind].qsize())
+            except queue.Full:
+                self.dropped[key] = self.dropped.get(key, 0) + 1
+                now = time.monotonic()
+                if now - self.last_drop_warning >= 5.0:
+                    print(f"[WARN] Recording queues full; dropped frames: {self.dropped}", file=sys.stderr)
+                    self.last_drop_warning = now
+
+    def record_rgb(self, camera, stream, header, bgr):
+        # The producer never modifies a resized frame after handing it off.
+        self._enqueue("rgb", f"{camera}_{stream}", header, bgr)
+
+    def record_lidar(self, name, msg):
+        # Copy the raw PointCloud2 payload and its schema for exact ROS replay.
+        payload = {
+            "data": bytes(msg.data),
+            "height": msg.height,
+            "width": msg.width,
+            "fields": [
+                {"name": f.name, "offset": f.offset, "datatype": f.datatype, "count": f.count}
+                for f in msg.fields
+            ],
+            "is_bigendian": msg.is_bigendian,
+            "point_step": msg.point_step,
+            "row_step": msg.row_step,
+            "is_dense": msg.is_dense,
+        }
+        self._enqueue("lidar", name, msg.header, payload)
+
+    def _write_rgb(self, key, timestamp, frame_id, received_ns, bgr):
+        if key not in self.videos:
+            spec = self.manifest["rgb_streams"][key]
+            video_path = self.folder / spec["video"]
+            video_path.parent.mkdir(parents=True, exist_ok=True)
+            writer = cv2.VideoWriter(
+                str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), VIDEO_FPS,
+                (OUTPUT_WIDTH, OUTPUT_HEIGHT),
+            )
+            if not writer.isOpened():
+                writer.release()
+                raise RuntimeError(f"Cannot open MP4 writer: {video_path}")
+            try:
+                index = (self.folder / spec["index"]).open("w", newline="", encoding="utf-8")
+            except Exception:
+                writer.release()
+                raise
+            csv_writer = csv.writer(index)
+            csv_writer.writerow(("frame_index", "stamp_ns", "frame_id", "received_ns"))
+            self.videos[key] = writer
+            self.index_files[key] = (index, csv_writer)
+        frame_index = self.counts.get(key, 0)
+        self.videos[key].write(bgr)
+        index, csv_writer = self.index_files[key]
+        csv_writer.writerow((frame_index, timestamp, frame_id, received_ns))
+        self.counts[key] = frame_index + 1
+
+    def _write_lidar(self, key, timestamp, frame_id, received_ns, payload):
+        spec = self.manifest["lidar_streams"][key]
+        if key not in self.lidar_files:
+            data_dir = self.folder / spec["data_dir"]
+            data_dir.mkdir(parents=True, exist_ok=True)
+            self.index_files[key] = (self.folder / spec["index"]).open("w", encoding="utf-8")
+            self.lidar_files[key] = [0, (data_dir / "chunk_000000.bin").open("wb")]
+        chunk, data_file = self.lidar_files[key]
+        length = len(payload["data"])
+        if data_file.tell() and data_file.tell() + length > LIDAR_CHUNK_BYTES:
+            data_file.close()
+            chunk += 1
+            data_file = (self.folder / spec["data_dir"] / f"chunk_{chunk:06d}.bin").open("wb")
+            self.lidar_files[key] = [chunk, data_file]
+        offset = data_file.tell()
+        data_file.write(payload["data"])
+        metadata = {k: v for k, v in payload.items() if k != "data"}
+        metadata.update({"file": f"chunk_{chunk:06d}.bin", "offset": offset, "length": length,
+                         "stamp_ns": timestamp, "frame_id": frame_id, "received_ns": received_ns})
+        self.index_files[key].write(json.dumps(metadata) + "\n")
+        self.counts[key] += 1
+
+    def _flush(self, kind):
+        # Each worker only touches its own files. Flush cloud data before its index.
+        if kind == "lidar":
+            for _, data_file in self.lidar_files.values():
+                data_file.flush()
+        for key in self.manifest[f"{kind}_streams"]:
+            entry = self.index_files.get(key)
+            if entry is not None:
+                (entry[0] if isinstance(entry, tuple) else entry).flush()
+
+    def _record_error(self, key, exc):
+        error = f"{key}: {exc}"
+        with self.state_lock:
+            if error not in self.errors:
+                self.errors.append(error)
+                print(f"[RECORD ERROR] {error}", file=sys.stderr)
+
+    def _run_writer(self, kind):
+        last_flush = time.monotonic()
+        failed = set()
+        while True:
+            try:
+                item = self.queues[kind].get(timeout=INDEX_FLUSH_SEC)
+            except queue.Empty:
+                item = ()
+            if item is None:
+                break
+            if item:
+                _, key, timestamp, frame_id, received_ns, payload = item
+                if key not in failed:
+                    try:
+                        if kind == "rgb":
+                            self._write_rgb(key, timestamp, frame_id, received_ns, payload)
+                        else:
+                            self._write_lidar(key, timestamp, frame_id, received_ns, payload)
+                    except Exception as exc:
+                        failed.add(key)
+                        self._record_error(key, exc)
+            if time.monotonic() - last_flush >= INDEX_FLUSH_SEC:
+                try:
+                    self._flush(kind)
+                except Exception as exc:
+                    self._record_error(kind, exc)
+                last_flush = time.monotonic()
+
+    def stop(self):
+        with self.state_lock:
+            if not self.active:
+                return
+            self.active = False
+        for pending in self.queues.values():
+            pending.put(None)
+        for worker in self.workers:
+            worker.join()
+        for key, (_, data_file) in self.lidar_files.items():
+            try:
+                data_file.close()
+            except Exception as exc:
+                self._record_error(key, exc)
+        for key, writer in self.videos.items():
+            try:
+                writer.release()
+            except Exception as exc:
+                self._record_error(key, exc)
+        for key, file_entry in self.index_files.items():
+            index = file_entry[0] if isinstance(file_entry, tuple) else file_entry
+            try:
+                index.close()
+            except Exception as exc:
+                self._record_error(key, exc)
+        self.manifest.update({
+            "stopped_at": datetime.now().astimezone().isoformat(),
+            "status": "complete" if not self.errors and not self.dropped else "incomplete",
+            "counts": self.counts,
+            "missing_streams": [key for key, count in self.counts.items() if count == 0],
+            "dropped": self.dropped,
+            "queue_high_water": self.queue_high_water,
+            "errors": self.errors,
+        })
+        self._write_manifest()
+        print(f"Recording saved to {self.folder}")
+        if self.dropped:
+            print(f"[WARN] Recording queue dropped frames: {self.dropped}")
+
+
+class RawRgbStreamer:
+    def __init__(self, launch_robot=False, save=False, camera_clouds=False):
+        self.launch_robot = launch_robot
+        self.save = save
+        self.camera_clouds = camera_clouds
+        self.projection_cache = {}
+        self.recorder = None
+        # Streaming sensors does not require the robot-control SDK, its
+        # joint-state liveness checks, or acquisition of control rights.
+        rclpy.init(args=[])
+        self.node = rclpy.create_node(f"sdk_sensor_streamer_{os.getpid()}")
+        self.executor = SingleThreadedExecutor()
+        self.executor.add_node(self.node)
+        self.spin_thread = threading.Thread(
+            target=self.executor.spin, daemon=True, name="sensor-stream-spin"
+        )
+        self.spin_thread.start()
+        self.publishers = {
+            camera: {
+                **({
+                    "color": self.node.create_publisher(Image, spec["color"], qos_profile_sensor_data),
+                } if "color" in spec else {
+                    stream: self.node.create_publisher(Image, topic, qos_profile_sensor_data)
+                    for stream, topic in spec["stereo"].items()
+                }),
+                **({
+                    "depth": self.node.create_publisher(Image, spec["depth"], qos_profile_sensor_data),
+                    "cloud": self.node.create_publisher(PointCloud2, spec["cloud"], qos_profile_sensor_data),
+                } if "depth" in spec else {}),
+            }
+            for camera, spec in CAMERAS.items()
+        }
+        self.lidar_publishers = {
+            name: self.node.create_publisher(PointCloud2, output_topic, qos_profile_sensor_data)
+            for name, (_, output_topic) in LIDAR_TOPICS.items()
+        }
+        self.subscriptions = []
+        self.stop_event = threading.Event()
+        self.lock = threading.Lock()
+        self.latest_color = {}
+        self.latest_color_input_shape = {}
+        self.latest_depth = {}
+        self.lidar_frames = {name: 0 for name in LIDAR_TOPICS}
+        self.last_data = {}
+        self.image_logs = set()
+        self.depth_warnings = set()
+        self.watchdog_thread = None
+
+    def mark_data(self, stream):
+        with self.lock:
+            self.last_data[stream] = time.monotonic()
+
+    def activate_device(self, service_name):
+        """Request sensor startup without depending on robot-control state."""
+        client = self.node.create_client(SetBool, service_name)
+        future = None
+        try:
+            if not client.wait_for_service(timeout_sec=1.0):
+                print(f"[WARN] {service_name} is unavailable; listening for existing streams.")
+                return
+            future = client.call_async(SetBool.Request(data=True))
+            completed = threading.Event()
+            future.add_done_callback(lambda _future: completed.set())
+            if not completed.wait(5.0):
+                print(f"[WARN] {service_name} timed out; listening for existing streams.")
+                return
+            response = future.result()
+            if not response.success:
+                print(f"[WARN] {service_name} failed: {response.message}; listening for existing streams.")
+        except Exception as error:
+            print(f"[WARN] {service_name}: {error}; listening for existing streams.")
+        finally:
+            if future is not None and not future.done():
+                future.cancel()
+            self.node.destroy_client(client)
+
+    def publish_frame(self, camera, compressed_msg, width, height, bgr, stream="color"):
+        """Publish the decoded BGR ndarray as sensor_msgs/Image."""
+        if bgr is None or bgr.ndim != 3 or bgr.shape[2] != 3:
+            return
+
+        input_shape = bgr.shape[:2]
+        bgr = cv2.resize(bgr, (OUTPUT_WIDTH, OUTPUT_HEIGHT), interpolation=cv2.INTER_AREA)
+        bgr = np.ascontiguousarray(bgr, dtype=np.uint8)
+        image = Image()
+        image.header = compressed_msg.header
+        image.height = int(bgr.shape[0])
+        image.width = int(bgr.shape[1])
+        image.encoding = "bgr8"
+        image.is_bigendian = 0
+        image.step = int(bgr.strides[0])
+        image.data = bgr.tobytes()
+        self.publishers[camera][stream].publish(image)
+        if self.recorder is not None and self.recorder.active:
+            self.recorder.record_rgb(camera, stream, image.header, bgr)
+        log_key = f"{camera}/{stream}"
+        if log_key not in self.image_logs:
+            output_topic = (
+                CAMERAS[camera]["color"]
+                if "color" in CAMERAS[camera]
+                else CAMERAS[camera]["stereo"][stream]
+            )
+            print(f"[IMAGE] Receiving {camera} {stream}; publishing {output_topic}")
+            self.image_logs.add(log_key)
+        self.mark_data(f"{camera}/{stream}")
+        if stream != "color":
+            return
+        with self.lock:
+            self.latest_color_input_shape[camera] = input_shape
+            if self.camera_clouds:
+                self.latest_color[camera] = (compressed_msg.header, bgr)
+        if self.camera_clouds:
+            self.try_publish_pointcloud(camera)
+
+    @staticmethod
+    def decode_depth(array, width, height):
+        """Decode the raw depth payload, which is normally uint16 millimetres."""
+        raw = np.asarray(array)
+        if raw.dtype == np.uint16 and width and height and raw.size == width * height:
+            return raw.reshape(height, width)
+        if raw.dtype == np.float32 and width and height and raw.size == width * height:
+            return raw.reshape(height, width)
+        if width and height and raw.size == width * height * 2:
+            return raw.view(np.uint16).reshape(height, width)
+        if width and height and raw.size == width * height * 4:
+            return raw.view(np.float32).reshape(height, width)
+        return None
+
+    def publish_depth(self, camera, compressed_msg, width, height, array):
+        with self.lock:
+            input_shape = self.latest_color_input_shape.get(camera)
+        if input_shape is not None:
+            height, width = input_shape
+        depth = self.decode_depth(array, width, height)
+        if depth is None:
+            warning_key = (camera, np.asarray(array).nbytes, width, height)
+            if warning_key not in self.depth_warnings:
+                print(
+                    f"[WARN] Cannot decode {camera} depth: received {np.asarray(array).nbytes} "
+                    f"bytes; RGB is {width}x{height}. Raw depth has no size metadata and "
+                    "may use a different resolution; configure its native width/height "
+                    "before reshaping (do not assume the RGB size)."
+                )
+                self.depth_warnings.add(warning_key)
+            return
+        if depth.shape[:2] != (OUTPUT_HEIGHT, OUTPUT_WIDTH):
+            depth = cv2.resize(depth, (OUTPUT_WIDTH, OUTPUT_HEIGHT), interpolation=cv2.INTER_NEAREST)
+        depth = np.ascontiguousarray(depth)
+        image = Image()
+        image.header = compressed_msg.header
+        image.height, image.width = depth.shape
+        image.encoding = "32FC1" if depth.dtype == np.float32 else "16UC1"
+        image.is_bigendian = 0
+        image.step = int(depth.strides[0])
+        image.data = depth.tobytes()
+        self.publishers[camera]["depth"].publish(image)
+        log_key = f"{camera}/depth"
+        if log_key not in self.image_logs:
+            print(f"[IMAGE] Receiving {camera} depth; publishing {CAMERAS[camera]['depth']}")
+            self.image_logs.add(log_key)
+        self.mark_data(f"{camera}/depth")
+        if self.camera_clouds:
+            with self.lock:
+                self.latest_depth[camera] = (compressed_msg.header, depth)
+            self.try_publish_pointcloud(camera)
+
+    def try_publish_pointcloud(self, camera):
+        with self.lock:
+            if not self.publishers[camera]["cloud"].get_subscription_count():
+                self.latest_color.pop(camera, None)
+                self.latest_depth.pop(camera, None)
+                return
+            color = self.latest_color.get(camera)
+            depth = self.latest_depth.get(camera)
+            if color is None or depth is None:
+                return
+            delta = stamp_ns(color[0]) - stamp_ns(depth[0])
+            if abs(delta) > CLOUD_SYNC_NS:
+                # Discard the older sample; never reuse a frame in two clouds.
+                (self.latest_depth if delta > 0 else self.latest_color).pop(camera, None)
+                return
+            self.latest_color.pop(camera)
+            self.latest_depth.pop(camera)
+        self.publish_pointcloud(camera, depth[0], color[1], depth[1])
+
+    def publish_pointcloud(self, camera, header, bgr, depth):
+        if bgr.shape[:2] != depth.shape[:2]:
+            return
+        height, width = depth.shape
+        cache_key = (camera, height, width, INTRINSICS[camera])
+        if cache_key not in self.projection_cache:
+            fx, fy, cx, cy = INTRINSICS[camera]
+            scale_x, scale_y = width / INTRINSICS_WIDTH, height / INTRINSICS_HEIGHT
+            fx, fy, cx, cy = fx * scale_x, fy * scale_y, cx * scale_x, cy * scale_y
+            v, u = np.indices((height, width), dtype=np.float32)
+            self.projection_cache[cache_key] = ((u - cx) / fx, (v - cy) / fy)
+        x_factor, y_factor = self.projection_cache[cache_key]
+        z = depth.astype(np.float32)
+        if depth.dtype == np.uint16:
+            z *= DEPTH_SCALE_M
+        valid = np.isfinite(z) & (z > 0)
+        points = np.empty((int(valid.sum()), 4), dtype="<f4")
+        points[:, 0] = x_factor[valid] * z[valid]
+        points[:, 1] = y_factor[valid] * z[valid]
+        points[:, 2] = z[valid]
+        colors = bgr[valid].astype("<u4")
+        rgb = (colors[:, 2] << 16) | (colors[:, 1] << 8) | colors[:, 0]
+        points[:, 3] = rgb.astype("<u4", copy=False).view("<f4")
+        cloud = PointCloud2()
+        cloud.header = header
+        cloud.height, cloud.width = 1, len(points)
+        cloud.fields = [PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1)
+                        for name, offset in (("x", 0), ("y", 4), ("z", 8), ("rgb", 12))]
+        cloud.is_bigendian = False
+        cloud.point_step, cloud.row_step = 16, 16 * len(points)
+        cloud.is_dense = True
+        cloud.data = points.tobytes()
+        self.publishers[camera]["cloud"].publish(cloud)
+
+    def lidar_callback(self, name, msg):
+        """Relay each Livox scan and report its arrival rate."""
+        self.lidar_frames[name] += 1
+        self.mark_data(f"lidar/{name}")
+        self.lidar_publishers[name].publish(msg)
+        if self.recorder is not None and self.recorder.active:
+            self.recorder.record_lidar(name, msg)
+
+    def watchdog(self):
+        expected = [
+            f"{camera}/{stream}"
+            for camera, spec in CAMERAS.items()
+            for stream in (spec.get("stereo", {}).keys() or ("color",))
+        ]
+        expected += [f"{camera}/depth" for camera, spec in CAMERAS.items() if "depth" in spec]
+        expected += [f"lidar/{name}" for name in LIDAR_TOPICS]
+        warned = set()
+        while not self.stop_event.wait(1.0):
+            now = time.monotonic()
+            with self.lock:
+                last_data = dict(self.last_data)
+            for stream in expected:
+                last = last_data.get(stream)
+                if last is None or now - last > DATA_TIMEOUT_SEC:
+                    if stream not in warned:
+                        print(f"[WARN] No {stream} data for more than {DATA_TIMEOUT_SEC:.0f}s")
+                        warned.add(stream)
+                else:
+                    warned.discard(stream)
+
+    def start(self):
+        print("Connecting to the already launched robot...")
+        self.activate_device("/astribot_camera_control")
+        self.activate_device("/astribot_lidar_control")
+
+        if self.save:
+            self.recorder = SensorRecorder()
+            print(f"Recording in {self.recorder.folder}; press q to stop recording.")
+
+        # Give the camera driver time to advertise and begin streaming.
+        time.sleep(2.0)
+        print(f"RGB camera topics (all output images are {OUTPUT_WIDTH}x{OUTPUT_HEIGHT}):")
+        for spec in CAMERAS.values():
+            topics = spec.get("stereo", {"color": spec.get("color")})
+            for topic in topics.values():
+                print(f"  {topic}")
+        for camera, spec in CAMERAS.items():
+            if "stereo" in spec:
+                source_topic = spec["source"]
+
+                def stereo_callback(msg, c=camera):
+                    if msg.format.lower() != "jpeg":
+                        return
+                    bgr = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
+                    if bgr is None or bgr.shape[1] % 2:
+                        return
+                    midpoint = bgr.shape[1] // 2
+                    for stream, view in (("left", bgr[:, :midpoint]), ("right", bgr[:, midpoint:])):
+                        self.publish_frame(c, msg, view.shape[1], view.shape[0], view, stream)
+
+                self.subscriptions.append(
+                    self.node.create_subscription(
+                        CompressedImage, source_topic, stereo_callback, 10
+                    )
+                )
+                for topic in spec["stereo"].values():
+                    print(f"Publishing {topic} ({OUTPUT_WIDTH}x{OUTPUT_HEIGHT}) from {source_topic}")
+                continue
+
+            color_topic = f"/astribot_camera/{camera}/color_compress/compressed"
+
+            def color_callback(msg, c=camera):
+                if msg.format.lower() != "jpeg":
+                    return
+                encoded = np.frombuffer(msg.data, np.uint8)
+                bgr = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+                if bgr is not None:
+                    self.publish_frame(c, msg, bgr.shape[1], bgr.shape[0], bgr)
+
+            def depth_callback(msg, c=camera):
+                with self.lock:
+                    input_shape = self.latest_color_input_shape.get(c)
+                if input_shape is None:
+                    return
+                height, width = input_shape
+                self.publish_depth(c, msg, width, height, np.frombuffer(msg.data, np.uint8))
+
+            color_subscription = self.node.create_subscription(
+                CompressedImage, color_topic, color_callback, 10
+            )
+            self.subscriptions.append(color_subscription)
+            if "depth" in spec:
+                depth_topic = f"/astribot_camera/{camera}/depth_compress"
+                depth_subscription = self.node.create_subscription(
+                    CompressedImage, depth_topic, depth_callback, 10
+                )
+                self.subscriptions.append(depth_subscription)
+                print(
+                    f"Publishing {spec['color']} and {spec['depth']} "
+                    f"({OUTPUT_WIDTH}x{OUTPUT_HEIGHT})"
+                )
+                if self.camera_clouds:
+                    print(f"Camera cloud available to subscribers: {spec['cloud']}")
+            else:
+                print(f"Publishing {spec['color']} ({OUTPUT_WIDTH}x{OUTPUT_HEIGHT})")
+        for name, (input_topic, output_topic) in LIDAR_TOPICS.items():
+            subscription = self.node.create_subscription(
+                PointCloud2,
+                input_topic,
+                lambda msg, n=name: self.lidar_callback(n, msg),
+                qos_profile_sensor_data,
+            )
+            self.subscriptions.append(subscription)
+            print(f"Publishing LiDAR {input_topic} as {output_topic}")
+        self.watchdog_thread = threading.Thread(target=self.watchdog, daemon=True)
+        self.watchdog_thread.start()
+
+    def run(self):
+        if self.launch_robot:
+            print("--launch is incompatible with read-only mode; skipping home motion.")
+        else:
+            print("Robot launch assumed; read-only mode enabled; skipping home motion.")
+        self.start()
+        print("Streaming. Press Ctrl-C to quit.")
+        terminal_fd = None
+        terminal_settings = None
+        if self.save and sys.stdin.isatty():
+            terminal_fd = sys.stdin.fileno()
+            terminal_settings = termios.tcgetattr(terminal_fd)
+            tty.setcbreak(terminal_fd)
+        elif self.save:
+            print("[WARN] No interactive terminal; use Ctrl-C to finish recording and quit.")
+        try:
+            while not self.stop_event.is_set():
+                if terminal_fd is None:
+                    self.stop_event.wait(0.2)
+                    continue
+                readable, _, _ = select.select([terminal_fd], [], [], 0.2)
+                if readable and sys.stdin.read(1).lower() == "q":
+                    if self.recorder is not None and self.recorder.active:
+                        self.recorder.stop()
+                        print("Recording stopped; sensor streaming continues. Press Ctrl-C to quit.")
+        finally:
+            if terminal_settings is not None:
+                termios.tcsetattr(terminal_fd, termios.TCSADRAIN, terminal_settings)
+
+    def stop(self):
+        self.stop_event.set()
+        for subscription in self.subscriptions:
+            self.node.destroy_subscription(subscription)
+        self.subscriptions.clear()
+        if self.recorder is not None:
+            self.recorder.stop()
+        # These drivers can be shared with other applications. Stop our local
+        # relay without switching off the robot's sensors.
+        self.executor.shutdown(timeout_sec=2.0)
+        self.spin_thread.join(timeout=2.0)
+        self.node.destroy_node()
+        rclpy.shutdown()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Stream RGB-D and LiDAR sensor data.")
+    parser.add_argument(
+        "--launch",
+        action="store_true",
+        help="Request explicit robot launch/startup mode; read-only mode remains enabled.",
+    )
+    parser.add_argument(
+        "--save", action="store_true",
+        help="Record RGB MP4s, frame timestamps, and LiDAR clouds until q or Ctrl-C.",
+    )
+    parser.add_argument(
+        "--camera-clouds", action="store_true",
+        help="Generate camera point clouds for subscribers using paired RGB/depth frames.",
+    )
+    parser.add_argument(
+        "--domain-id", type=int, default=os.environ.get("ROS_DOMAIN_ID", "25"),
+        help="ROS domain for this process (default: ROS_DOMAIN_ID, or 25 when unset).",
+    )
+    args = parser.parse_args()
+    os.environ["ROS_DOMAIN_ID"] = str(args.domain_id)
+    print(f"[ROS] ROS_DOMAIN_ID={args.domain_id}", flush=True)
+    print(
+        f"[ROS] In the viewing terminal, source "
+        f"{Path(__file__).resolve().parent.parent / 'env.sh'} first (Fast DDS network profile).",
+        flush=True,
+    )
+    print(
+        f"[ROS] To list outputs in another terminal: "
+        f"ROS_DOMAIN_ID={args.domain_id} ros2 topic list --no-daemon --spin-time 3 | grep '^/sdk/'",
+        flush=True,
+    )
+    streamer = RawRgbStreamer(launch_robot=args.launch, save=args.save, camera_clouds=args.camera_clouds)
+
+    def shutdown(_signum, _frame):
+        streamer.stop_event.set()
+
+    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, shutdown)
+    try:
+        streamer.run()
+    finally:
+        streamer.stop()
+
+
+if __name__ == "__main__":
+    main()

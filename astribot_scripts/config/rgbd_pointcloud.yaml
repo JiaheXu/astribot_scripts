@@ -1,0 +1,80 @@
+# Head/torso only. RGB intrinsics: Kalibr 2026-11-19, 640x480 resized RGB,
+# copied from ../apriltag_utils/config/cameras.yaml (relative to SDK root).
+# Native depth sizes/transport: record_rgbd_mcap.py. Depth calibration, units,
+# and registration have NOT been verified; nulls deliberately prevent clouds.
+# Fill depth.camera_matrix/distortion_coefficients, depth_unit_m, and the 4x4
+# color_from_depth (row-major; p_color = R * p_depth + t, t in meters).
+# Use identity ONLY for verified matching optical centers / registered depth.
+# Do not reuse RGB intrinsics for native depth just because sizes match.
+# See ../docs/rgbd_pointcloud.md. Restart the node after calibration edits.
+cameras:
+  head_rgbd:
+    color_topic: /sdk/astribot_camera/head_rgbd/color_image
+    depth_topic: /astribot_camera/head_rgbd/depth_compress
+    depth_transport: raw_compressed
+    optical_frame: astribot_viz_head_rgbd_optical
+    depth_input_frame: ''
+    depth_bigendian: false
+    depth_unit_m: null
+    color:
+      width: 640
+      height: 480
+      camera_matrix:
+      - 375.4396720193694
+      - 0.0
+      - 320.9007999446031
+      - 0.0
+      - 500.086143979
+      - 244.2798996658744
+      - 0.0
+      - 0.0
+      - 1.0
+      distortion_model: plumb_bob
+      distortion_coefficients:
+      - 0.07299779270841418
+      - -0.08335393007731949
+      - 0.0007396001871881766
+      - -1.9585822945486577e-05
+      - 0.0
+    depth:
+      width: 640
+      height: 576
+      camera_matrix: null
+      distortion_model: plumb_bob
+      distortion_coefficients: null
+    color_from_depth: null
+  torso_rgbd:
+    color_topic: /sdk/astribot_camera/torso_rgbd/color_image
+    depth_topic: /astribot_camera/torso_rgbd/depth_compress
+    depth_transport: raw_compressed
+    optical_frame: astribot_viz_torso_rgbd_optical
+    depth_input_frame: ''
+    depth_bigendian: false
+    depth_unit_m: null
+    color:
+      width: 640
+      height: 480
+      camera_matrix:
+      - 349.01859470222246
+      - 0.0
+      - 320.53656920157437
+      - 0.0
+      - 465.5110784684927
+      - 241.95365601199728
+      - 0.0
+      - 0.0
+      - 1.0
+      distortion_model: plumb_bob
+      distortion_coefficients:
+      - 0.015559004573703438
+      - -0.06380548414959665
+      - 0.000654889000267021
+      - -0.0008720153123658663
+      - 0.0
+    depth:
+      width: 640
+      height: 480
+      camera_matrix: null
+      distortion_model: plumb_bob
+      distortion_coefficients: null
+    color_from_depth: null

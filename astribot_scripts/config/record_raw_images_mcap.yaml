@@ -1,0 +1,3 @@
+# Preserve raw messages without adding image/video or MCAP chunk compression.
+# Keep the storage plugin's normal indexing and summary defaults for playback.
+compression: "None"

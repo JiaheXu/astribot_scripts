@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Astribot Desktop Button Guide</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; background: #f2f5f7; color: #172b3a; font: 16px/1.55 system-ui, sans-serif; }
+    main { max-width: 980px; margin: 32px auto; padding: 32px 40px; background: white; border-radius: 12px; }
+    h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.2; }
+    h2 { margin: 32px 0 12px; font-size: 22px; }
+    p { margin: 10px 0; }
+    .subtitle { color: #526578; margin-bottom: 24px; }
+    .notice { padding: 14px 18px; border-left: 4px solid #da9a1d; background: #fff8e8; }
+    .flow { padding: 16px 20px; border-left: 4px solid #227d80; background: #eff8f8; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    th, td { border-bottom: 1px solid #dce3e8; padding: 12px 10px; text-align: left; vertical-align: top; }
+    th { background: #edf2f5; font-size: 14px; }
+    .button-name { width: 215px; }
+    .button-name img { display: block; width: 36px; height: 36px; margin-bottom: 7px; }
+    code { font: 0.88em/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
+    pre { padding: 14px 16px; background: #f2f5f7; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    li { margin: 9px 0; padding-left: 3px; }
+    .small { font-size: 14px; color: #526578; }
+    @media (max-width: 680px) {
+      main { margin: 0; padding: 24px 16px; border-radius: 0; }
+      .button-name { width: 125px; }
+      th, td { padding: 10px 6px; }
+    }
+    @media print { body { background: white; } main { max-width: none; margin: 0; padding: 0; } tr, pre, .notice { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Astribot desktop buttons</h1>
+  <p class="subtitle">Operator guide for the remote PC: <strong>192.168.100.102</strong><br>Updated November 19, 2026 · Works offline</p>
+
+  <div class="flow">
+    <strong>Usual order</strong><br>
+    Power On &amp; Home Robot (when needed) → Start Astribot → Record RGB-D MCAP<br>
+    <strong>Finish:</strong> Ctrl+C in the recording terminal → Stop Astribot → robot shutdown when finished.
+  </div>
+
+  <h2>What each button does</h2>
+  <table>
+    <thead><tr><th class="button-name">Desktop button</th><th>Action and what to expect</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="button-name"><img src="../config/astribot-power.svg" alt="Yellow power symbol"><strong>Power On &amp; Home Robot</strong></td>
+        <td>Powers on the robot, confirms power, activates the drives, and confirms activation. It then waits <strong>five extra healthy seconds</strong>, requests the vendor WEB → PC control handoff, confirms release, and runs the SDK home routine. The terminal reports success only after home is verified. It stays open afterward; press Enter to close it.<br><strong>This performs physical motion and opens the grippers.</strong> It does not start the observation stack. Reusing the button on an already active robot still requests homing.</td>
+      </tr>
+      <tr>
+        <td class="button-name"><img src="../config/astribot-start.svg" alt="Green play triangle"><strong>Start Astribot</strong></td>
+        <td>Starts the sensor publishers, rear-lidar FAST-LIO, robot visualization, and <strong>one RViz window on this remote PC</strong>. RViz uses <code>map</code> as its fixed world frame and shows the robot, map, odometry history, camera images, and configured frame axes. Wait for startup success and check that the camera images update.<br>If the observation session is already running, this button <strong>restarts it and begins a fresh map and trajectory</strong>. It does not power on, activate, or home the robot.</td>
+      </tr>
+      <tr>
+        <td class="button-name"><img src="../config/astribot-record.svg" alt="Red recording circle"><strong>Record RGB-D MCAP</strong></td>
+        <td>Opens a terminal and records RGB and depth from the four cameras listed below. A new timestamped recording folder is created automatically. Leave the terminal open while recording. <strong>Press Ctrl+C in that terminal</strong> to stop and finalize the files. Repeat clicks cannot create a duplicate recorder. If publishers are absent, it waits for their topics.</td>
+      </tr>
+      <tr>
+        <td class="button-name"><img src="../config/astribot-stop.svg" alt="Red stop square"><strong>Stop Astribot</strong></td>
+        <td>Stops this observation session, including its sensor publisher, FAST-LIO, robot visualization, and RViz. It leaves the robot controller and camera/lidar drivers active. <strong>It does not stop the separate recorder, deactivate the robot, or power it off.</strong> Stop recording with Ctrl+C first. This button also succeeds when the observation session is already stopped.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Start a recording</h2>
+  <ol>
+    <li>If the robot is off or inactive, use <strong>Power On &amp; Home Robot</strong> and wait for “Startup complete.” If it is already active and positioned for work, skip this button to avoid another home motion.</li>
+    <li>Click <strong>Start Astribot</strong>. Wait for startup success and confirm that the four camera views are updating in RViz.</li>
+    <li>Click <strong>Record RGB-D MCAP</strong>. The terminal prints the recording folder and topic names. The terminal shows how many RGB and depth frames each camera has saved.</li>
+  </ol>
+  <p class="notice"><strong>Before homing:</strong> keep the robot’s motion area clear and make sure the grippers are not holding an object. Startup refuses other SDK controllers and VR/joystick/drag modes. It stops on a failed transition; it does not blindly retry or force power off.</p>
+
+  <h2>Images and recording files</h2>
+  <p>The recorder samples each of the eight topics at <strong>3 Hz</strong>. RGB images use <code>rgb8</code> at 640 × 480. Depth images use <code>16UC1</code> at each camera’s native depth resolution. All eight use <code>sensor_msgs/msg/Image</code> and retain their camera timestamps.</p>
+  <table>
+    <thead><tr><th>Camera</th><th>RGB and depth topics</th></tr></thead>
+    <tbody>
+      <tr><td>Head</td><td><code>/sdk/astribot_camera/head_rgbd/color_image</code><br><code>/sdk/astribot_camera/head_rgbd/depth_image</code></td></tr>
+      <tr><td>Torso</td><td><code>/sdk/astribot_camera/torso_rgbd/color_image</code><br><code>/sdk/astribot_camera/torso_rgbd/depth_image</code></td></tr>
+      <tr><td>Left wrist</td><td><code>/sdk/astribot_camera/left_wrist_rgbd/color_image</code><br><code>/sdk/astribot_camera/left_wrist_rgbd/depth_image</code></td></tr>
+      <tr><td>Right wrist</td><td><code>/sdk/astribot_camera/right_wrist_rgbd/color_image</code><br><code>/sdk/astribot_camera/right_wrist_rgbd/depth_image</code></td></tr>
+    </tbody>
+  </table>
+  <p>Each click uses a new folder:</p>
+  <pre><code>/home/fourier/astribot_sdk_ros2/recordings/raw_rgbd_YYYYMMDD_HHMMSS/</code></pre>
+  <p>The folder contains numbered <code>.mcap</code> files and <code>metadata.yaml</code>. Files roll over at <strong>3,990,000,000 bytes (3.99 GB)</strong>, leaving room for final messages and indexes below the requested decimal 4 GB limit for these configured image sizes. Keep the entire folder together when copying a recording.</p>
+  <p>This button records camera messages only. Use OBS separately for a screen video of RViz or the desktop. The recorder saves received frames; network losses or camera startup delays can create gaps.</p>
+
+  <h2>Finish the session</h2>
+  <ol>
+    <li>Focus the <strong>recording terminal</strong> and press <strong>Ctrl+C</strong>. Wait for recording to finish and the terminal to exit. This lets rosbag2 finalize the MCAP files and metadata.</li>
+    <li>Click <strong>Stop Astribot</strong> to stop the observation stack.</li>
+    <li>When finished with the robot, run the separate shutdown command below on the remote PC. It deactivates the drives, waits for confirmation, then powers off and confirms completion.</li>
+  </ol>
+  <pre><code>/home/fourier/astribot_sdk_ros2/astribot_scripts/robot_power.sh stop --execute</code></pre>
+  <p>Robot shutdown is a separate terminal command; the red <strong>Stop Astribot</strong> button controls the observation stack only.</p>
+
+  <h2>If something does not start</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>What to check</th></tr></thead>
+    <tbody>
+      <tr><td>Recorder is waiting for topics</td><td>Start Astribot and check that camera images are arriving. The recorder needs the camera drivers to be streaming.</td></tr>
+      <tr><td>“Recording already running”</td><td>Use the existing recording terminal. Stop it with Ctrl+C before starting a new recording.</td></tr>
+      <tr><td>RViz opens but data is missing</td><td>Check the Start log for the missing stream or transform. Confirm the robot network is connected and the robot is active for joint feedback.</td></tr>
+      <tr><td>Robot startup fails</td><td>Read the terminal and its saved log. If another SDK controller or teleoperation mode owns control, end that session before retrying. A delay cannot resolve a persistent ownership conflict.</td></tr>
+    </tbody>
+  </table>
+  <p>Logs on the remote PC:</p>
+  <pre><code>/home/fourier/.local/state/astribot/start.log
+/home/fourier/.local/state/astribot/stop.log
+/home/fourier/.local/state/astribot/robot-start-*.log</code></pre>
+  <p class="small">Open this guide again with the <strong>Astribot Button Guide</strong> desktop shortcut. Opening the guide does not start any robot or recording process.</p>
+</main>
+</body>
+</html>

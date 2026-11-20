@@ -1,0 +1,117 @@
+{
+  "source": "astribot_scripts/README.md and docs/imu_mounts_reference.md",
+  "upstream_model_commit": "32b67e270fecd49bd5444ca49824dcc171dfb3e6",
+  "calibration": "nominal robot-description poses; not driver or per-robot calibration",
+  "assumption": "/livox/lidar_back points are expressed in the physical front lidar frame; /livox/imu_back retains rear IMU axes",
+  "front_in_chassis_base": {
+    "translation_m": [
+      0.17393,
+      0.16893,
+      0.073397
+    ],
+    "quaternion_xyzw": [
+      0.0,
+      0.0,
+      -0.3826834,
+      0.9238796
+    ]
+  },
+  "rear_in_chassis_base": {
+    "translation_m": [
+      -0.1795908,
+      -0.1745908,
+      0.157397
+    ],
+    "quaternion_xyzw": [
+      0.0,
+      0.0,
+      0.9238795,
+      0.3826834
+    ]
+  },
+  "imu_in_rear_lidar": {
+    "translation_m": [
+      0.011,
+      0.02329,
+      -0.04412
+    ],
+    "quaternion_xyzw": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "cloud_to_rear_lidar": {
+    "R": [
+      [
+        -0.9999999999999973,
+        7.65366794386324e-08,
+        0.0
+      ],
+      [
+        -7.65366794386324e-08,
+        -0.9999999999999973,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_m": [
+      -0.007071085023249463,
+      -0.4928828418822003,
+      -0.084
+    ]
+  },
+  "rear_lidar_to_cloud": {
+    "R": [
+      [
+        -0.9999999999999973,
+        -7.65366794386324e-08,
+        0.0
+      ],
+      [
+        7.65366794386324e-08,
+        -0.9999999999999973,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_m": [
+      -0.007071122746865514,
+      -0.4928828413410016,
+      0.084
+    ]
+  },
+  "rear_lidar_to_imu": {
+    "R": [
+      [
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        1
+      ]
+    ],
+    "T_m": [
+      -0.011,
+      -0.02329,
+      0.04412
+    ]
+  }
+}

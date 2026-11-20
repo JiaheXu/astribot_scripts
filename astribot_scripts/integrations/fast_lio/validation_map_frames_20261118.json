@@ -1,0 +1,61 @@
+{
+  "messages": {
+    "left_wrist_rgbd": 24,
+    "imu_odom": 98,
+    "cloud": 98,
+    "chassis_odom": 98,
+    "right_wrist_rgbd": 24,
+    "head_rgbd": 23,
+    "torso_rgbd": 23,
+    "imu_path": 10,
+    "chassis_path": 10
+  },
+  "world_frames": {
+    "imu_odom": "map",
+    "chassis_odom": "map",
+    "imu_path": "map",
+    "chassis_path": "map",
+    "cloud": "map"
+  },
+  "sensor_tf": [
+    [
+      "map",
+      "body"
+    ]
+  ],
+  "map_transforms_m": {
+    "astribot_viz_chassis": [
+      -0.0113,
+      -0.2565,
+      -0.2016
+    ],
+    "astribot_viz_head_rgbd_optical": [
+      -0.0837,
+      -0.2805,
+      1.433
+    ],
+    "astribot_viz_torso_rgbd_optical": [
+      -0.0137,
+      -0.2529,
+      0.8539
+    ],
+    "astribot_viz_left_wrist_rgbd_optical": [
+      -0.0561,
+      -0.6991,
+      0.8931
+    ],
+    "astribot_viz_right_wrist_rgbd_optical": [
+      -0.4465,
+      -0.3119,
+      0.8885
+    ]
+  },
+  "rgb_encodings": {
+    "head_rgbd": "rgb8",
+    "torso_rgbd": "rgb8",
+    "left_wrist_rgbd": "rgb8",
+    "right_wrist_rgbd": "rgb8"
+  },
+  "chassis_samples_matched": 98,
+  "max_conversion_error": 4.440892098500626e-16
+}

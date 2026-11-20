@@ -1,0 +1,18 @@
+*build
+__pycache__
+.vscode
+wandb/
+recordings/
+install
+log
+.idea
+astribot_sdk_develop_ws.code-workspace
+CLAUDE.md
+.claude
+
+# Local caches and machine-generated runtime configuration
+.DS_Store
+*.py[cod]
+.venv/
+/config/fastdds_whitelist_192.xml
+/config/fastdds_whitelist_192.xml.??????

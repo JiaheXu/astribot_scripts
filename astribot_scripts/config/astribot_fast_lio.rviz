@@ -1,0 +1,335 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 35; 35; 40
+    Fixed Frame: map
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/PointCloud2
+      Name: FAST-LIO map (60 s registered scans)
+      Enabled: true
+      Topic:
+        Value: /fast_lio/rear/cloud_registered
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Position Transformer: XYZ
+      Color Transformer: AxisColor
+      Axis: Z
+      Style: Points
+      Size (Pixels): 2
+      Size (m): 0.025
+      Alpha: 0.8
+      Decay Time: 60
+      Use Fixed Frame: true
+    - Class: rviz_common/Group
+      Name: Head and torso RGB-D clouds
+      Enabled: true
+      Displays:
+        - Class: rviz_default_plugins/PointCloud2
+          Name: Head colored cloud
+          Enabled: true
+          Topic:
+            Value: /astribot_viz/head_rgbd/points
+            Reliability Policy: Best Effort
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Depth: 2
+          Position Transformer: XYZ
+          Color Transformer: RGB8
+          Style: Points
+          Size (Pixels): 3
+          Size (m): 0.01
+          Alpha: 1
+          Decay Time: 1
+          Use Fixed Frame: true
+        - Class: rviz_default_plugins/PointCloud2
+          Name: Torso colored cloud
+          Enabled: true
+          Topic:
+            Value: /astribot_viz/torso_rgbd/points
+            Reliability Policy: Best Effort
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Depth: 2
+          Position Transformer: XYZ
+          Color Transformer: RGB8
+          Style: Points
+          Size (Pixels): 3
+          Size (m): 0.01
+          Alpha: 1
+          Decay Time: 1
+          Use Fixed Frame: true
+    - Class: rviz_default_plugins/Odometry
+      Name: Chassis odometry history (1000 poses)
+      Enabled: true
+      Topic:
+        Value: /fast_lio/chassis/odometry
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+      Keep: 1000
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.1
+      Shape:
+        Value: Axes
+        Axes Length: 0.15
+        Axes Radius: 0.006
+        Alpha: 1
+      Covariance:
+        Value: false
+    - Class: rviz_default_plugins/Path
+      Name: Robot chassis trajectory (session history)
+      Enabled: true
+      Topic:
+        Value: /fast_lio/chassis/path
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Color: 255; 255; 255
+      Line Style: Billboards
+      Line Width: 0.035
+      Buffer Length: 1
+      Pose Style: None
+      Alpha: 1
+    - Class: rviz_default_plugins/Grid
+      Name: Ground grid
+      Enabled: true
+      Cell Size: 0.5
+      Plane Cell Count: 10
+      Reference Frame: map
+    - Class: rviz_common/Group
+      Name: Click to navigate
+      Enabled: true
+      Displays:
+        - Class: rviz_default_plugins/MarkerArray
+          Name: Navigation target and status
+          Enabled: true
+          Marker Topic:
+            Value: /astribot_nav/goal_markers
+            Reliability Policy: Reliable
+            Durability Policy: Transient Local
+            History Policy: Keep Last
+            Depth: 1
+        - Class: rviz_default_plugins/Path
+          Name: Nav2 planned path
+          Enabled: true
+          Topic:
+            Value: /astribot_nav/plan_map
+            Reliability Policy: Reliable
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Depth: 1
+          Color: 40; 220; 255
+          Line Style: Billboards
+          Line Width: 0.045
+          Buffer Length: 1
+          Pose Style: None
+    - Class: rviz_common/Group
+      Name: AprilTag detections
+      Enabled: true
+      Displays:
+        - Class: rviz_default_plugins/MarkerArray
+          Name: Tag centers and RGB axes
+          Enabled: true
+          Marker Topic:
+            Value: /astribot_viz/apriltag_axes
+            Reliability Policy: Reliable
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Depth: 10
+    - Class: rviz_default_plugins/RobotModel
+      Name: Robot (current joints)
+      Enabled: true
+      Alpha: 0.7
+      Visual Enabled: true
+      Collision Enabled: false
+      Description Source: Topic
+      Description Topic:
+        Value: /astribot_viz/robot_description
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+    - Class: rviz_common/Group
+      Name: Robot joint axes
+      Enabled: true
+      Displays:
+        - Class: rviz_default_plugins/Axes
+          Name: Chassis base
+          Enabled: true
+          Reference Frame: astribot_viz_chassis
+          Length: 0.35
+          Radius: 0.012
+        - Class: rviz_default_plugins/Axes
+          Name: Torso joint 1
+          Enabled: true
+          Reference Frame: astribot_torso_link_1
+          Length: 0.18
+          Radius: 0.008
+        - Class: rviz_default_plugins/Axes
+          Name: Torso joint 2
+          Enabled: true
+          Reference Frame: astribot_torso_link_2
+          Length: 0.18
+          Radius: 0.008
+        - Class: rviz_default_plugins/Axes
+          Name: Torso joint 3
+          Enabled: true
+          Reference Frame: astribot_torso_link_3
+          Length: 0.18
+          Radius: 0.008
+        - Class: rviz_default_plugins/Axes
+          Name: Chest (torso joint 4)
+          Enabled: true
+          Reference Frame: astribot_torso_link_4
+          Length: 0.22
+          Radius: 0.009
+        - Class: rviz_default_plugins/Axes
+          Name: Head pan (joint 1)
+          Enabled: true
+          Reference Frame: astribot_head_link_1
+          Length: 0.12
+          Radius: 0.006
+        - Class: rviz_default_plugins/Axes
+          Name: Head tilt (joint 2)
+          Enabled: true
+          Reference Frame: astribot_head_link_2
+          Length: 0.18
+          Radius: 0.008
+        - Class: rviz_default_plugins/Axes
+          Name: Left wrist (joint 7)
+          Enabled: true
+          Reference Frame: astribot_arm_left_link_7
+          Length: 0.2
+          Radius: 0.008
+        - Class: rviz_default_plugins/Axes
+          Name: Right wrist (joint 7)
+          Enabled: true
+          Reference Frame: astribot_arm_right_link_7
+          Length: 0.2
+          Radius: 0.008
+    - Class: rviz_common/Group
+      Name: Camera optical frames
+      Enabled: true
+      Displays:
+        - Class: rviz_default_plugins/Axes
+          Name: Head RGB camera
+          Enabled: true
+          Reference Frame: astribot_viz_head_rgbd_optical
+          Length: 0.18
+          Radius: 0.006
+        - Class: rviz_default_plugins/Axes
+          Name: Torso RGB camera
+          Enabled: true
+          Reference Frame: astribot_viz_torso_rgbd_optical
+          Length: 0.18
+          Radius: 0.006
+        - Class: rviz_default_plugins/Axes
+          Name: Left wrist RGB camera
+          Enabled: true
+          Reference Frame: astribot_viz_left_wrist_rgbd_optical
+          Length: 0.18
+          Radius: 0.006
+        - Class: rviz_default_plugins/Axes
+          Name: Right wrist RGB camera
+          Enabled: true
+          Reference Frame: astribot_viz_right_wrist_rgbd_optical
+          Length: 0.18
+          Radius: 0.006
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Current Cartesian poses
+      Enabled: true
+      Marker Topic:
+        Value: /astribot_viz/current_poses
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Desired Cartesian poses
+      Enabled: true
+      Marker Topic:
+        Value: /astribot_viz/desired_poses
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 10
+    - Class: rviz_default_plugins/Image
+      Name: Head RGB
+      Enabled: true
+      Topic:
+        Value: /sdk/astribot_camera/head_rgbd/color_image
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Transport Hint: raw
+      Normalize Range: true
+    - Class: rviz_default_plugins/Image
+      Name: Torso RGB
+      Enabled: true
+      Topic:
+        Value: /sdk/astribot_camera/torso_rgbd/color_image
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Transport Hint: raw
+      Normalize Range: true
+    - Class: rviz_default_plugins/Image
+      Name: Left wrist RGB
+      Enabled: true
+      Topic:
+        Value: /sdk/astribot_camera/left_wrist_rgbd/color_image
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Transport Hint: raw
+      Normalize Range: true
+    - Class: rviz_default_plugins/Image
+      Name: Right wrist RGB
+      Enabled: true
+      Topic:
+        Value: /sdk/astribot_camera/right_wrist_rgbd/color_image
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Transport Hint: raw
+      Normalize Range: true
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetGoal
+      Topic: /astribot_nav/goal_pose_map
+    - Class: rviz_default_plugins/PublishPoint
+      Topic: /astribot_nav/goal_point_map
+      Single click: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 6
+      Focal Point:
+        X: 0.15
+        Y: 0
+        Z: 0.8
+      Pitch: 0.35
+      Yaw: 0.8
+      Target Frame: map
+  Enabled: true
+Window Geometry:
+  Width: 1280
+  Height: 900

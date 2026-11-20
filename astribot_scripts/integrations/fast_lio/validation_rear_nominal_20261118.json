@@ -1,0 +1,179 @@
+{
+  "date": "2026-11-18",
+  "configuration": "rear pair, nominal robot-description poses; published cloud assumed in front-lidar frame; native rear IMU axes",
+  "fast_lio_commit": "2fffc570a25d0df172720bac034fbdb6a13d2162",
+  "native_parser_tests_passed": 9,
+  "script_tests_passed": 42,
+  "config_sha256": "db74f1a6f69c4f0ec98a7e799e0a011752036635a21492db9a81ebef4abc73dd",
+  "patch_sha256": "d96d88af4bb447b2f0320705fd1e3181f5ab46cc607c3ca61087df23c824b4fd",
+  "model": {
+    "source": "astribot_scripts/README.md and docs/imu_mounts_reference.md",
+    "upstream_model_commit": "32b67e270fecd49bd5444ca49824dcc171dfb3e6",
+    "calibration": "nominal robot-description poses; not driver or per-robot calibration",
+    "assumption": "/livox/lidar_back points are expressed in the physical front lidar frame; /livox/imu_back retains rear IMU axes",
+    "front_in_chassis_base": {
+      "translation_m": [
+        0.17393,
+        0.16893,
+        0.073397
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        -0.3826834,
+        0.9238796
+      ]
+    },
+    "rear_in_chassis_base": {
+      "translation_m": [
+        -0.1795908,
+        -0.1745908,
+        0.157397
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.9238795,
+        0.3826834
+      ]
+    },
+    "imu_in_rear_lidar": {
+      "translation_m": [
+        0.011,
+        0.02329,
+        -0.04412
+      ],
+      "quaternion_xyzw": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    "cloud_to_rear_lidar": {
+      "R": [
+        [
+          -0.9999999999999973,
+          7.65366794386324e-08,
+          0.0
+        ],
+        [
+          -7.65366794386324e-08,
+          -0.9999999999999973,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "T_m": [
+        -0.007071085023249463,
+        -0.4928828418822003,
+        -0.084
+      ]
+    },
+    "rear_lidar_to_cloud": {
+      "R": [
+        [
+          -0.9999999999999973,
+          -7.65366794386324e-08,
+          0.0
+        ],
+        [
+          7.65366794386324e-08,
+          -0.9999999999999973,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "T_m": [
+        -0.007071122746865514,
+        -0.4928828413410016,
+        0.084
+      ]
+    },
+    "rear_lidar_to_imu": {
+      "R": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "T_m": [
+        -0.011,
+        -0.02329,
+        0.04412
+      ]
+    }
+  },
+  "replay": {
+    "bag": "/home/fourier/astribot_sdk_ros2/robot_data_run01",
+    "ros_domain_id": 127,
+    "localhost_only": true,
+    "playback_rate": 1.0,
+    "counts": {
+      "lidar": 1017,
+      "imu": 20337,
+      "registered_cloud": 1013
+    },
+    "odometry_count": 1013,
+    "odometry_duration_s": 101.19999575614929,
+    "all_finite": true,
+    "timestamp_dt_min_max_s": [
+      0.0989987850189209,
+      0.10146808624267578
+    ],
+    "quaternion_norm_min_max": [
+      0.9999999999999446,
+      1.0000000000000002
+    ],
+    "path_length_m": 3.274764692827717,
+    "max_position_step_m": 0.018864999722397684,
+    "start_position_m": [
+      -0.0007217853154169357,
+      0.0046212746049394335,
+      0.008133140276758022
+    ],
+    "end_position_m": [
+      -0.1297741777661568,
+      0.03180884748362985,
+      -0.00043922314849999445
+    ],
+    "position_min_m": [
+      -0.13215611099050342,
+      -0.0027227744455582442,
+      -0.016752020083015993
+    ],
+    "position_max_m": [
+      0.44067777396841895,
+      0.567592901287947,
+      0.010291777829343372
+    ],
+    "passed": true
+  },
+  "runtime_parameters_read_back": true,
+  "runtime_parameters_file_remote": "/home/fourier/ros2_ws/validation/fast_lio_rear_nominal_20261118/parameters.yaml",
+  "limitations": [
+    "Nominal model calibration; actual driver-frame assumptions not independently verified",
+    "No ground-truth accuracy evaluation",
+    "Odometry at rear IMU origin, not chassis",
+    "No live motion validation"
+  ]
+}

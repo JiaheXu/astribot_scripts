@@ -1,0 +1,21 @@
+# Match the SDK's sensor-data publishers; preserve each original Image message.
+/sdk/astribot_camera/head_rgbd/color_image:
+  history: keep_last
+  depth: 10
+  reliability: best_effort
+  durability: volatile
+/sdk/astribot_camera/torso_rgbd/color_image:
+  history: keep_last
+  depth: 10
+  reliability: best_effort
+  durability: volatile
+/sdk/astribot_camera/left_wrist_rgbd/color_image:
+  history: keep_last
+  depth: 10
+  reliability: best_effort
+  durability: volatile
+/sdk/astribot_camera/right_wrist_rgbd/color_image:
+  history: keep_last
+  depth: 10
+  reliability: best_effort
+  durability: volatile

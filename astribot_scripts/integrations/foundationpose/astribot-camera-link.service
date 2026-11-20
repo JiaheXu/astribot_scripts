@@ -1,0 +1,13 @@
+[Unit]
+Description=Forward Astribot head and torso camera images to FoundationPose
+
+[Service]
+WorkingDirectory=%h/astribot_sdk_ros2
+Environment=ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=%h/astribot_sdk_ros2/astribot_scripts/integrations/foundationpose/source_peer.xml
+ExecStart=/bin/bash -c 'source /opt/ros/humble/setup.bash && exec python3 -m astribot_scripts.integrations.foundationpose.camera_link'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
